@@ -1,6 +1,7 @@
 # 2D Frame Curve Board
 
 A small Godot 4 editor for a 2D cubic Hermite curve controlled by coordinate frames. The blue curve is an editing guide; the green polyline is the generated profile. The current executable is [build/Frame2DCurveBoard_AnalyticFit.exe](build/Frame2DCurveBoard_AnalyticFit.exe).
+<img width="1581" height="988" alt="屏幕截图 2026-10-30 140740" src="https://github.com/user-attachments/assets/061b6f03-6ee6-4177-8a7f-a346ce921a9f" />
 
 ## Edit
 
@@ -49,19 +50,3 @@ Click **Export...**, choose a format in the file dialog, then choose a destinati
 | PNG | Clean raster rendering of the production polylines | Preview or illustration |
 
 All formats export two production polylines when the normal offset has nonzero width, or one merged production polyline when every normal scale is zero. The blue centerline is not present in any exported file. The **O** key changes editor visibility only; it does not change exported geometry. SVG and OBJ use sampled polylines, so they preserve the displayed geometry to the current sampling resolution rather than exporting native Hermite control data. SVG uses screen-style Y downward. OBJ flips Y so its coordinates follow the usual 3D Y-up convention. All exported coordinates use editor units; choose the scale you need after import.
-
-The **Blender** button uses the Steam installation at `C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe`. It writes the production polyline data and a small import script to the executable's `build/exports` folder, launches a new Blender window, and creates native Blender Curve objects with `POLY` splines. Their bevel depth and extrusion are explicitly zero, and they are shown as wires: **no tube or surface is generated**. You can use the polylines later for Blender's curve and Geometry Nodes modeling workflows. It flips Y and uses 0.01 Blender units per editor unit so the result is conveniently sized for inspection. Blender 5.2.3 LTS background checks found one Curve object by default, two after normal scaling, and zero evaluated surface faces in either case.
-
-## Verify and rebuild
-
-From the project directory, run:
-
-```powershell
-& 'C:\Program Files (x86)\Steam\steamapps\common\Godot Engine\godot.windows.opt.tools.64.exe' --headless --path . --script res://tests/frame_insertion.gd --log-file tests/frame_insertion.log
-& 'C:\Program Files (x86)\Steam\steamapps\common\Godot Engine\godot.windows.opt.tools.64.exe' --headless --path . --script res://tests/curve_workflow.gd --log-file tests/curve_workflow.log
-& 'C:\Program Files (x86)\Steam\steamapps\common\Godot Engine\godot.windows.opt.tools.64.exe' --headless --path . --script res://tests/analytic_fit.gd --log-file tests/analytic_fit.log
-& 'C:\Program Files (x86)\Steam\steamapps\common\Godot Engine\godot.windows.opt.tools.64.exe' --headless --path . --script res://tests/analytic_fit_editor.gd --log-file tests/analytic_fit_editor.log
-& 'C:\Program Files (x86)\Steam\steamapps\common\Godot Engine\godot.windows.opt.tools.64.exe' --headless --path . --export-release 'Windows Desktop' build/Frame2DCurveBoard_AnalyticFit.exe
-```
-
-The four logs should say `Frame insertion checks passed`, `Curve workflow checks passed`, `Analytic fit checks passed`, and `Analytic editor fit checks passed`. The original project under `D:\LAB\2D曲线编辑` is outside the writable workspace and has not been overwritten.
