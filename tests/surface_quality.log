@@ -1,0 +1,5 @@
+Godot Engine v4.7.2.stable.steam.ed1daf0bf - https://godotengine.org
+
+QUALITY circle triangles=102 min_angle=16.23 p10=0.299 p90=0.804 ratio=2.69
+QUALITY concave triangles=29 min_angle=20.23 p10=0.446 p90=1.803 ratio=4.04
+QUALITY warped triangles=12 min_angle=42.66 p10=1.417 p90=2.103 ratio=1.48
