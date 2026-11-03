@@ -2,6 +2,8 @@
 
 A small Godot 4 editor for a 2D cubic Hermite curve controlled by coordinate frames. The blue curve is an editing guide; the green polyline is the generated profile. The current executable is [build/Frame2DCurveBoard_AnalyticFit.exe](build/Frame2DCurveBoard_AnalyticFit.exe).
 <img width="1581" height="988" alt="屏幕截图 2026-10-30 140740" src="https://github.com/user-attachments/assets/061b6f03-6ee6-4177-8a7f-a346ce921a9f" />
+<img width="1282" height="839" alt="8b9d310daacab8a6105500c070686635" src="https://github.com/user-attachments/assets/2d4a969a-9d9b-4925-9db6-2b3f29062aae" />
+
 
 ## Edit
 
