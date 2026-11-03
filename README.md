@@ -1,6 +1,5 @@
 # 3D Frame Curve Board
 
-A small Godot 4 editor for a 2D cubic Hermite curve controlled by coordinate frames. The blue curve is an editing guide; the green polyline is the generated profile.
 <img width="1282" height="839" alt="8b9d310daacab8a6105500c070686635" src="https://github.com/user-attachments/assets/2d4a969a-9d9b-4925-9db6-2b3f29062aae" />
 
 A Godot 4 editor for spatial cubic Hermite curves. The Windows executable is `Frame3DCurveBoard.exe` in the project root. The scene is `scenes/main_3d.tscn`.
