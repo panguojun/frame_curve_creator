@@ -1,4 +1,4 @@
-﻿extends SceneTree
+extends SceneTree
 
 func _initialize() -> void:
 	var builder = load("res://scripts/surface_fill.gd").new()
@@ -22,6 +22,16 @@ func _initialize() -> void:
 	assert(nonplanar["euler"] == 1)
 	for i in range(4):
 		assert(nonplanar["vertices"][i].is_equal_approx(warped[i]))
+	var undulating := PackedVector3Array()
+	for i in range(32):
+		var angle := TAU * float(i) / 32.0
+		undulating.append(Vector3(2.0*cos(angle), 2.0*sin(angle), 0.6*cos(2.0*angle) + 0.2*sin(3.0*angle)))
+	var stable: Dictionary = builder.build(undulating, 1, 20)
+	var more_iterations: Dictionary = builder.build(undulating, 1, 60)
+	assert(not stable.has("error") and not more_iterations.has("error"))
+	assert(stable["vertices"].size() == more_iterations["vertices"].size())
+	for i in range(stable["vertices"].size()):
+		assert(stable["vertices"][i].distance_to(more_iterations["vertices"][i]) < 0.01)
 	var bowtie := PackedVector3Array([Vector3(-1,-1,0),Vector3(1,1,0),Vector3(-1,1,0),Vector3(1,-1,0)])
 	assert(builder.build(bowtie).has("error"))
 	print("Surface fill checks passed")

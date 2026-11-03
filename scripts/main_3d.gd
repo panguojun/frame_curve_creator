@@ -23,13 +23,13 @@ const BLENDER_EXE := "C:/Program Files (x86)/Steam/steamapps/common/Blender/blen
 const BLENDER_IMPORT_SCRIPT := """
 import bpy
 import json
-import sys
 from pathlib import Path
 
-source = Path(sys.argv[sys.argv.index('--') + 1])
+source = Path(__PAYLOAD_PATH__)
+receipt = Path(__RECEIPT_PATH__)
 data = json.loads(source.read_text(encoding='utf-8'))
-bpy.ops.object.select_all(action='SELECT')
-bpy.ops.object.delete(use_global=False)
+collection = bpy.data.collections.new('Frame Curve Board ' + source.stem)
+bpy.context.scene.collection.children.link(collection)
 created = 0
 for entry in data['curves']:
     points = entry['points']
@@ -50,15 +50,11 @@ for entry in data['curves']:
         control.co = (point[0], point[1], point[2], 1.0)
     spline.use_cyclic_u = closed
     obj = bpy.data.objects.new(name, curve)
-    bpy.context.collection.objects.link(obj)
+    collection.objects.link(obj)
     obj.display_type = 'WIRE'
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     created += 1
-for area in (bpy.context.screen.areas if bpy.context.screen else []):
-    if area.type == 'VIEW_3D':
-        area.spaces.active.region_3d.view_location = (0.0, 0.0, 0.0)
-        area.spaces.active.region_3d.view_distance = 12.0
 faces = 0
 surfaces = data.get('surfaces', [])
 if not surfaces and data.get('surface', {}).get('vertices'):
@@ -72,9 +68,12 @@ for surface in surfaces:
         mesh = bpy.data.meshes.new(name)
         mesh.from_pydata(vertices, [], triangles)
         mesh.update()
+        for polygon in mesh.polygons:
+            polygon.use_smooth = True
         obj = bpy.data.objects.new(name, mesh)
-        bpy.context.collection.objects.link(obj)
+        collection.objects.link(obj)
         faces += len(mesh.polygons)
+receipt.write_text(f'{created} curves, {faces} faces', encoding='utf-8')
 print(f'Frame Curve 3D imported: {created} editable Blender Curves, {faces} surface faces')
 """
 
@@ -88,6 +87,13 @@ var surface_data: Dictionary = {}
 var last_surface_error := ""
 var surface_builder: RefCounted
 var selected := -1
+var selected_frames: Array[int] = []
+var undo_stack: Array[Dictionary] = []
+var drag_positions: Dictionary = {}
+var drag_start := Vector2.ZERO
+var box_start := Vector2.ZERO
+var box_end := Vector2.ZERO
+var box_additive := false
 var active_view := 0
 var drag_mode := ""
 var insert_mode := false
@@ -98,6 +104,7 @@ var orbit_pitch := -0.42
 var orbit_distance := 13.0
 var orbit_target := Vector3.ZERO
 var preview: SubViewportContainer
+var box_overlay: Control
 var viewport_3d: SubViewport
 var scene_root: Node3D
 var camera: Camera3D
@@ -136,8 +143,68 @@ var surface_info: Label
 var surface_detail_field: SpinBox
 var surface_smooth_field: SpinBox
 
+func _copy_frames(source: Array) -> Array[CurveFrame]:
+	var result: Array[CurveFrame] = []
+	for frame in source:
+		result.append(CurveFrame.new(frame.position, frame.tangent))
+	return result
+
+func _snapshot() -> Dictionary:
+	var layers: Array[Dictionary] = []
+	for layer in other_curves:
+		layers.append({"frames":_copy_frames(layer["frames"]),"closed":layer["closed"],"surface":layer.get("surface",false)})
+	return {"frames":_copy_frames(frames),"layers":layers,"closed":closed,"surface":surface_enabled,"refine":surface_refine,"smooth":surface_smooth,"selection":selected_frames.duplicate()}
+
+func _record_undo() -> void:
+	if frames.is_empty():
+		return
+	undo_stack.append(_snapshot())
+	if undo_stack.size() > 50:
+		undo_stack.pop_front()
+
+func _undo() -> void:
+	if undo_stack.is_empty():
+		_message("Nothing to undo")
+		return
+	var state: Dictionary = undo_stack.pop_back()
+	frames = _copy_frames(state["frames"])
+	other_curves = state["layers"]
+	closed = state["closed"]
+	surface_enabled = state["surface"]
+	surface_refine = state["refine"]
+	surface_smooth = state["smooth"]
+	selected_frames = state["selection"]
+	selected = selected_frames.back() if not selected_frames.is_empty() else -1
+	updating_fields = true
+	surface_detail_field.value = surface_refine
+	surface_smooth_field.value = surface_smooth
+	updating_fields = false
+	_refresh()
+	_message("Undid last edit")
+
+func _select_only(index: int) -> void:
+	selected = index
+	selected_frames.clear()
+	if index >= 0:
+		selected_frames.append(index)
+
+func _toggle_selected(index: int) -> void:
+	if selected_frames.has(index):
+		selected_frames.erase(index)
+	else:
+		selected_frames.append(index)
+	selected = selected_frames.back() if not selected_frames.is_empty() else -1
+
+func _move_indices() -> Array[int]:
+	var indices: Array[int] = selected_frames.duplicate()
+	for index in selected_frames:
+		for j in range(frames.size()):
+			if not indices.has(j) and frames[j].position.is_equal_approx(frames[index].position):
+				indices.append(j)
+	return indices
+
 func _ready() -> void:
-	get_window().title = "3D Frame Curve Board | Surface 0.3"
+	get_window().title = "3D Frame Curve Board | 0.4.2"
 	get_window().grab_focus.call_deferred()
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_make_preview()
@@ -152,6 +219,11 @@ func _make_preview() -> void:
 	preview.stretch = true
 	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(preview)
+	box_overlay = Control.new()
+	box_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(box_overlay)
+	box_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box_overlay.draw.connect(_draw_box_overlay)
 	viewport_3d = SubViewport.new()
 	viewport_3d.size = Vector2i(640, 360)
 	viewport_3d.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -310,6 +382,7 @@ func _template_point(p: Vector2, plane: int) -> Vector3:
 		_: return Vector3(0,p.y,p.x)
 
 func _apply_template() -> void:
+	_record_undo()
 	var shape := template_shape.selected
 	var plane := template_plane.selected
 	var a := template_a.value
@@ -333,23 +406,28 @@ func _apply_template() -> void:
 		for i in range(sides):
 			var theta := TAU*float(i)/sides+PI*0.5
 			points.append(Vector2(cos(theta),sin(theta))*a)
-	if shape != 0:
-		for _i in range(points.size()):
-			tangents.append(Vector2.ZERO)
 	other_curves.clear()
 	surface_data = {}
 	last_surface_error = ""
 	frames = []
 	for i in range(points.size()):
-		frames.append(CurveFrame.new(_template_point(points[i],plane),_template_point(tangents[i],plane)))
+		if shape == 0:
+			frames.append(CurveFrame.new(_template_point(points[i],plane),_template_point(tangents[i],plane)))
+		else:
+			var incoming := points[i] - points[(i-1+points.size()) % points.size()]
+			var outgoing := points[(i+1) % points.size()] - points[i]
+			frames.append(CurveFrame.new(_template_point(points[i],plane),_template_point(incoming,plane)))
+			frames.append(CurveFrame.new(_template_point(points[i],plane),_template_point(outgoing,plane)))
 	closed = true
 	surface_enabled = false
 	selected = 0
+	selected_frames = [0]
 	insert_mode = false
 	_refresh()
 	_message("Editable %s template created" % template_shape.get_item_text(shape))
 
 func _reset_sample() -> void:
+	_record_undo()
 	other_curves.clear()
 	surface_enabled = false
 	frames = [
@@ -360,6 +438,7 @@ func _reset_sample() -> void:
 	]
 	closed = false
 	selected = 1
+	selected_frames = [1]
 	insert_mode = false
 	_refresh()
 
@@ -399,7 +478,7 @@ func _make_properties() -> void:
 			properties.add_child(field)
 			property_fields.append(field)
 	var hint := Label.new()
-	hint.text = "Edit values or drag handles\nin FRONT / TOP / RIGHT."
+	hint.text = "Drag empty space to box-select.\nAlt+drag boxes in PERSPECTIVE.\nShift adds to the selection."
 	hint.position = Vector2(16, 506)
 	properties.add_child(hint)
 	surface_info = Label.new()
@@ -435,11 +514,17 @@ func _make_properties() -> void:
 	_layout_properties()
 
 func _on_surface_detail_changed(value: float) -> void:
+	if updating_fields or surface_refine == int(value):
+		return
+	_record_undo()
 	surface_refine = int(value)
 	_invalidate_background_surfaces()
 	_refresh()
 
 func _on_surface_smooth_changed(value: float) -> void:
+	if updating_fields or surface_smooth == int(value):
+		return
+	_record_undo()
 	surface_smooth = int(value)
 	_invalidate_background_surfaces()
 	_refresh()
@@ -460,10 +545,10 @@ func _sync_properties() -> void:
 	if property_title == null:
 		return
 	updating_fields = true
-	property_title.text = "FRAME %d" % (selected+1) if selected >= 0 else "SELECT A FRAME"
+	property_title.text = "%d FRAMES SELECTED" % selected_frames.size() if selected_frames.size() > 1 else ("FRAME %d" % (selected+1) if selected >= 0 else "SELECT A FRAME")
 	for field in property_fields:
-		field.editable = selected >= 0
-	if selected >= 0:
+		field.editable = selected >= 0 and selected_frames.size() <= 1
+	if selected >= 0 and selected_frames.size() <= 1:
 		var f := frames[selected]
 		var values := [f.position.x, f.position.y, f.position.z, f.tangent.x, f.tangent.y, f.tangent.z]
 		for i in range(6):
@@ -478,13 +563,17 @@ func _sync_properties() -> void:
 	updating_fields = false
 
 func _on_property_changed(value: float, row: int) -> void:
-	if updating_fields or selected < 0:
+	if updating_fields or selected < 0 or selected_frames.size() > 1:
 		return
 	var f := frames[selected]
+	if not is_equal_approx((f.position if row < 3 else f.tangent)[row if row < 3 else row-3], value):
+		_record_undo()
 	if row < 3:
-		var p := f.position
-		p[row] = value
-		f.position = p
+		var delta := value - f.position[row]
+		for index in _move_indices():
+			var p := frames[index].position
+			p[row] += delta
+			frames[index].position = p
 	else:
 		var t := f.tangent
 		t[row-3] = value
@@ -552,8 +641,10 @@ func _sample_frame_curve(frame_set: Array, is_closed: bool, steps: int = SAMPLES
 	for i in range(count):
 		var a: CurveFrame = frame_set[i]
 		var b: CurveFrame = frame_set[(i+1) % frame_set.size()]
+		if a.position.is_equal_approx(b.position):
+			continue
 		for k in range(steps + 1):
-			if i > 0 and k == 0:
+			if not center.is_empty() and k == 0:
 				continue
 			var u := float(k) / steps
 			var p := _hermite(a.position, b.position, a.tangent, b.tangent, u)
@@ -563,6 +654,48 @@ func _sample_frame_curve(frame_set: Array, is_closed: bool, steps: int = SAMPLES
 func _surface_boundary_points(frame_set: Array, is_closed: bool) -> PackedVector3Array:
 	var steps := clampi(int(512.0/maxi(frame_set.size(),1)),8,24)
 	return _sample_frame_curve(frame_set,is_closed,steps)
+
+func _clamp_to_view(p: Vector2, index: int) -> Vector2:
+	var r := _panel_rect(index)
+	return Vector2(clampf(p.x, r.position.x, r.end.x), clampf(p.y, r.position.y + 26.0, r.end.y))
+
+func _selection_projection(position: Vector3, index: int) -> Vector2:
+	if index < 3:
+		return _project(position, index)
+	var viewport_size := Vector2(viewport_3d.size)
+	return preview.position + camera.unproject_position(position) * (preview.size / viewport_size)
+
+func _box_selection_indices(start: Vector2, finish: Vector2, index: int) -> Array[int]:
+	var hits: Array[int] = []
+	var box := Rect2(start, finish - start).abs().grow(0.5)
+	for i in range(frames.size()):
+		if index == 3 and camera.is_position_behind(frames[i].position):
+			continue
+		if box.has_point(_selection_projection(frames[i].position, index)):
+			hits.append(i)
+	return hits
+
+func _finish_box_selection() -> void:
+	if box_start.distance_to(box_end) < 4.0:
+		if not box_additive:
+			_select_only(-1)
+	else:
+		if not box_additive:
+			_select_only(-1)
+		for index in _box_selection_indices(box_start, box_end, active_view):
+			if not selected_frames.has(index):
+				selected_frames.append(index)
+		selected = selected_frames.back() if not selected_frames.is_empty() else -1
+	_sync_properties()
+	queue_redraw()
+	box_overlay.queue_redraw()
+
+func _draw_box_overlay() -> void:
+	if drag_mode != "box":
+		return
+	var box := Rect2(box_start, box_end - box_start).abs()
+	box_overlay.draw_rect(box, Color(0.35, 0.65, 1.0, 0.18))
+	box_overlay.draw_rect(box, Color(0.55, 0.78, 1.0), false, 1.5)
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), BG)
@@ -589,7 +722,7 @@ func _draw() -> void:
 func _draw_toolbar() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(15, 28), "3D FRAME CURVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, Vector2(size.x-PROP_W+16, 28), "PROPERTIES", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("b6c5d8"))
-	var labels := ["ADD", "INSERT", "DELETE", "CLOSE", "TEMPLATE", "SURFACE", "BLENDER", "EXPORT", "OPEN", "RESET", "ZEN"]
+	var labels := ["ADD", "INSERT", "DELETE", "CLOSE", "TEMPLATE", "SURFACE", "BLENDER", "EXPORT", "OPEN", "RESET", "ZEN", "UNDO"]
 	for j in range(labels.size()):
 		var box := _tool_rect(j)
 		draw_rect(box, Color("3b618a") if (j == 1 and insert_mode) or (j == 3 and closed) or (j == 5 and surface_enabled) else Color("2c394e"))
@@ -602,13 +735,15 @@ func _tool_rect(j: int) -> Rect2:
 func _toolbar_action(p: Vector2) -> bool:
 	if zen_mode or p.x > RAIL_W or p.y < HEADER_H:
 		return false
-	for j in range(11):
+	for j in range(12):
 		if _tool_rect(j).has_point(p):
 			match j:
 				0: _add_frame()
 				1: insert_mode = not insert_mode
 				2: _delete_frame()
-				3: closed = not closed
+				3:
+					_record_undo()
+					closed = not closed
 				4: template_dialog.popup_centered()
 				5: _toggle_surface()
 				6: _open_in_blender()
@@ -616,6 +751,7 @@ func _toolbar_action(p: Vector2) -> bool:
 				8: load_dialog.popup_centered_ratio()
 				9: _reset_sample()
 				10: _toggle_zen()
+				11: _undo()
 			if j in [1,3]:
 				_refresh()
 			else:
@@ -647,7 +783,7 @@ func _draw_ortho(index: int, curves: Dictionary) -> void:
 		if r.grow(-6).has_point(p):
 			draw_line(p, t, BLUE, 1.5)
 			draw_circle(t, 5, BLUE)
-			draw_circle(p, 7 if j == selected else 5, YELLOW if j == selected else GREEN)
+			draw_circle(p, 7 if selected_frames.has(j) else 5, YELLOW if selected_frames.has(j) else GREEN)
 			draw_string(ThemeDB.fallback_font, p + Vector2(10, -7), str(j+1), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
 
 func _draw_polyline(points: PackedVector3Array, index: int, color: Color, width: float) -> void:
@@ -661,8 +797,8 @@ func _draw_polyline(points: PackedVector3Array, index: int, color: Color, width:
 func _draw_footer() -> void:
 	var y := size.y - FOOTER_H
 	draw_rect(Rect2(0, y, size.x, FOOTER_H), Color("111722"))
-	var s := "Drag point or blue tangent · middle drag pan · wheel zoom · F insert · F11 ZEN"
-	if selected >= 0 and selected < frames.size():
+	var s := "Drag empty space to box-select · Alt+drag in perspective · Shift adds · Ctrl+Z undo"
+	if selected_frames.size() == 1 and selected >= 0 and selected < frames.size():
 		var f := frames[selected]
 		s = "Frame %d  XYZ (%.2f, %.2f, %.2f)  tangent (%.2f, %.2f, %.2f)    |    %s" % [selected+1, f.position.x, f.position.y, f.position.z, f.tangent.x, f.tangent.y, f.tangent.z, s]
 	if Time.get_ticks_msec() < toast_until:
@@ -681,14 +817,21 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		_mouse_motion(event)
 	elif event is InputEventKey and event.pressed and not event.echo:
-		if get_viewport().gui_get_focus_owner() == null:
+		if event.keycode == KEY_Z and event.ctrl_pressed:
+			_undo()
+		elif get_viewport().gui_get_focus_owner() == null:
 			_key(event)
 
 func _mouse_button(e: InputEventMouseButton) -> void:
 	var v := _view_at(e.position)
 	if e.button_index == MOUSE_BUTTON_LEFT:
 		if not e.pressed:
+			if drag_mode == "box":
+				box_end = _clamp_to_view(e.position, active_view)
+				_finish_box_selection()
 			drag_mode = ""
+			drag_positions.clear()
+			box_overlay.queue_redraw()
 			return
 		if _toolbar_action(e.position):
 			return
@@ -698,21 +841,38 @@ func _mouse_button(e: InputEventMouseButton) -> void:
 		if focused != null:
 			focused.release_focus()
 		active_view = v
-		if v == 3:
+		if e.alt_pressed:
+			_start_box_selection(e.position, v, e.shift_pressed)
+		elif v == 3:
 			drag_mode = "orbit"
 		elif insert_mode or e.double_click:
 			_insert_nearest(e.position, v)
 			insert_mode = false
 		else:
-			var hit := _hit(e.position, v)
+			var hit := _hit(e.position, v, e.shift_pressed)
 			if hit["index"] < 0:
 				var other_hit := _hit_other(e.position,v)
 				if other_hit["layer"] >= 0:
 					_activate_other(other_hit["layer"])
-					hit = _hit(e.position,v)
-			selected = hit["index"]
-			drag_mode = hit["part"]
-			_sync_properties()
+					hit = _hit(e.position,v, e.shift_pressed)
+			if hit["index"] < 0:
+				_start_box_selection(e.position, v, e.shift_pressed)
+			elif e.shift_pressed and hit["part"] == "point":
+				_toggle_selected(hit["index"])
+				drag_mode = ""
+			elif hit["index"] >= 0 and selected_frames.size() > 1 and selected_frames.has(hit["index"]) and hit["part"] == "point":
+				selected = hit["index"]
+				drag_mode = "point"
+			else:
+				_select_only(hit["index"])
+				drag_mode = hit["part"]
+			drag_start = e.position
+			drag_positions.clear()
+			if drag_mode == "point":
+				for index in _move_indices():
+					drag_positions[index] = frames[index].position
+			if drag_mode != "box":
+				_sync_properties()
 	elif e.button_index == MOUSE_BUTTON_MIDDLE:
 		if e.pressed and v >= 0 and v < 3:
 			active_view = v
@@ -730,7 +890,10 @@ func _mouse_button(e: InputEventMouseButton) -> void:
 	queue_redraw()
 
 func _mouse_motion(e: InputEventMouseMotion) -> void:
-	if drag_mode == "orbit":
+	if drag_mode == "box":
+		box_end = _clamp_to_view(e.position, active_view)
+		box_overlay.queue_redraw()
+	elif drag_mode == "orbit":
 		orbit_yaw -= e.relative.x * 0.008
 		orbit_pitch = clampf(orbit_pitch - e.relative.y*0.008, -1.45, 1.45)
 		_update_camera()
@@ -739,13 +902,33 @@ func _mouse_motion(e: InputEventMouseMotion) -> void:
 	elif selected >= 0 and active_view < 3 and drag_mode != "":
 		var f := frames[selected]
 		match drag_mode:
-			"point": f.position = _unproject(e.position, active_view, f.position)
-			"tangent": f.tangent = (_unproject(e.position, active_view, f.position + f.tangent*HANDLE_FACTOR) - f.position) / HANDLE_FACTOR
+			"point":
+				if not drag_positions.is_empty():
+					if not drag_positions.has("recorded"):
+						_record_undo()
+						drag_positions["recorded"] = true
+					var delta := _unproject(e.position, active_view, Vector3.ZERO) - _unproject(drag_start, active_view, Vector3.ZERO)
+					for index in drag_positions:
+						if index is int:
+							frames[index].position = drag_positions[index] + delta
+			"tangent":
+				if not drag_positions.has("recorded"):
+					_record_undo()
+					drag_positions["recorded"] = true
+				f.tangent = (_unproject(e.position, active_view, f.position + f.tangent*HANDLE_FACTOR) - f.position) / HANDLE_FACTOR
 		_refresh()
 	if drag_mode != "":
 		queue_redraw()
 
-func _hit(p: Vector2, v: int) -> Dictionary:
+func _start_box_selection(p: Vector2, view: int, additive: bool) -> void:
+	active_view = view
+	box_start = _clamp_to_view(p, view)
+	box_end = box_start
+	box_additive = additive
+	drag_mode = "box"
+	box_overlay.queue_redraw()
+
+func _hit(p: Vector2, v: int, prefer_unselected: bool = false) -> Dictionary:
 	var best := 13.0
 	var result := {"index": -1, "part": ""}
 	for j in range(frames.size()):
@@ -753,7 +936,7 @@ func _hit(p: Vector2, v: int) -> Dictionary:
 		var handles := [f.position, f.position + f.tangent*HANDLE_FACTOR]
 		for k in range(2):
 			var d := p.distance_to(_project(handles[k], v))
-			if d < best:
+			if d < best or (prefer_unselected and k == 0 and is_equal_approx(d,best) and not selected_frames.has(j)):
 				best = d
 				result = {"index": j, "part": ["point", "tangent"][k]}
 	return result
@@ -770,6 +953,7 @@ func _hit_other(p: Vector2, v: int) -> Dictionary:
 	return result
 
 func _activate_other(index: int) -> void:
+	_record_undo()
 	var saved := {"frames":frames,"closed":closed,"surface":surface_enabled,"surface_data":surface_data,"surface_mesh":surface_node.mesh}
 	var layer := other_curves[index]
 	frames = layer["frames"]
@@ -777,7 +961,7 @@ func _activate_other(index: int) -> void:
 	surface_enabled = bool(layer.get("surface",false))
 	surface_data = layer.get("surface_data",{})
 	other_curves[index] = saved
-	selected = -1
+	_select_only(-1)
 	_refresh()
 
 func _insert_nearest(p: Vector2, v: int) -> void:
@@ -788,6 +972,8 @@ func _insert_nearest(p: Vector2, v: int) -> void:
 	for i in range(count):
 		var a := frames[i]
 		var b := frames[(i+1)%frames.size()]
+		if a.position.is_equal_approx(b.position):
+			continue
 		for k in range(1, SAMPLES):
 			var u := float(k)/SAMPLES
 			var d := _project(_hermite(a.position,b.position,a.tangent,b.tangent,u),v).distance_to(p)
@@ -802,28 +988,44 @@ func _insert_nearest(p: Vector2, v: int) -> void:
 	var b := frames[(best_segment+1)%frames.size()]
 	var pos := _hermite(a.position,b.position,a.tangent,b.tangent,best_u)
 	var tan := _derivative(a.position,b.position,a.tangent,b.tangent,best_u)
+	_record_undo()
 	selected = best_segment+1
+	selected_frames = [selected]
 	frames.insert(selected, CurveFrame.new(pos,tan))
 	_refresh()
 
 func _add_frame() -> void:
+	_record_undo()
 	var last: CurveFrame = frames.back()
 	frames.append(CurveFrame.new(last.position + last.tangent.normalized()*2.0, last.tangent))
 	selected = frames.size()-1
+	selected_frames = [selected]
 	_refresh()
 
 func _delete_frame() -> void:
 	if selected >= 0 and frames.size() > 2:
-		frames.remove_at(selected)
+		_record_undo()
+		var indices := selected_frames.duplicate()
+		indices.sort()
+		indices.reverse()
+		for index in indices:
+			if frames.size() > 2:
+				frames.remove_at(index)
 		selected = mini(selected, frames.size()-1)
+		selected_frames = [selected]
 		_refresh()
 
 func _key(e: InputEventKey) -> void:
+	if e.keycode == KEY_Z and e.ctrl_pressed:
+		_undo()
+		return
 	match e.keycode:
 		KEY_A: _add_frame()
 		KEY_F: insert_mode = not insert_mode
 		KEY_DELETE: _delete_frame()
-		KEY_C: closed = not closed
+		KEY_C:
+			_record_undo()
+			closed = not closed
 		KEY_X: save_dialog.popup_centered_ratio()
 		KEY_O: load_dialog.popup_centered_ratio()
 		KEY_T: template_dialog.popup_centered()
@@ -832,9 +1034,11 @@ func _key(e: InputEventKey) -> void:
 		KEY_R: _reset_sample()
 		KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN:
 			if selected >= 0 and active_view < 3:
+				_record_undo()
 				var delta := Vector2(-1 if e.keycode == KEY_LEFT else 1 if e.keycode == KEY_RIGHT else 0, -1 if e.keycode == KEY_UP else 1 if e.keycode == KEY_DOWN else 0) * (0.2 if e.shift_pressed else 0.02)
-				var f := frames[selected]
-				f.position = _unproject(_project(f.position,active_view)+Vector2(delta.x,-delta.y)*view_zoom[active_view],active_view,f.position)
+				for index in _move_indices():
+					var f := frames[index]
+					f.position = _unproject(_project(f.position,active_view)+Vector2(delta.x,-delta.y)*view_zoom[active_view],active_view,f.position)
 	_refresh()
 
 func _toggle_zen() -> void:
@@ -849,6 +1053,7 @@ func _toggle_zen() -> void:
 	queue_redraw()
 
 func _toggle_surface() -> void:
+	_record_undo()
 	if surface_enabled:
 		surface_enabled = false
 		_refresh()
@@ -1003,7 +1208,7 @@ func _update_dynamic_3d() -> void:
 		marker.queue_free()
 	for i in range(frames.size()):
 		marker_nodes[i].position = frames[i].position
-		marker_nodes[i].material_override = selected_material if i == selected else marker_material
+		marker_nodes[i].material_override = selected_material if selected_frames.has(i) else marker_material
 
 func _surface_mesh(data: Dictionary) -> ArrayMesh:
 	var arrays := []
@@ -1032,7 +1237,9 @@ func _write_blender_payload() -> Dictionary:
 		return {}
 	var stamp := str(Time.get_unix_time_from_system())
 	var data_path := folder.path_join("frame_curve_"+stamp+".json")
-	var script_path := folder.path_join("blender_import_curve_3d.py")
+	var script_path := folder.path_join("blender_import_curve_"+stamp+".py")
+	var bridge_path := folder.path_join("blender_bridge.ps1")
+	var receipt_path := folder.path_join("frame_curve_"+stamp+".imported")
 	_save_file(data_path)
 	if not FileAccess.file_exists(data_path):
 		return {}
@@ -1040,9 +1247,15 @@ func _write_blender_payload() -> Dictionary:
 	if script == null:
 		_message("Could not write Blender import script")
 		return {}
-	script.store_string(BLENDER_IMPORT_SCRIPT)
+	script.store_string(BLENDER_IMPORT_SCRIPT.replace("__PAYLOAD_PATH__",JSON.stringify(data_path)).replace("__RECEIPT_PATH__",JSON.stringify(receipt_path)))
 	script.close()
-	return {"data":data_path,"script":script_path}
+	var bridge := FileAccess.open(bridge_path,FileAccess.WRITE)
+	if bridge == null:
+		_message("Could not write Blender bridge")
+		return {}
+	bridge.store_string(FileAccess.get_file_as_string("res://scripts/blender_bridge.ps1"))
+	bridge.close()
+	return {"data":data_path,"script":script_path,"bridge":bridge_path,"receipt":receipt_path}
 
 func _open_in_blender() -> void:
 	if not FileAccess.file_exists(BLENDER_EXE):
@@ -1051,8 +1264,15 @@ func _open_in_blender() -> void:
 	var paths := _write_blender_payload()
 	if paths.is_empty():
 		return
-	var pid := OS.create_process(BLENDER_EXE,["--python",paths["script"],"--",paths["data"]])
-	_message("Opening Blender with the current 3D curve" if pid > 0 else "Could not start Blender")
+	var output := []
+	var result := OS.execute("powershell.exe",["-NoProfile","-STA","-ExecutionPolicy","Bypass","-File",paths["bridge"],"-ImportScript",paths["script"],"-Receipt",paths["receipt"]],output,true)
+	if result == 0:
+		_message("Imported into the open Blender scene")
+	elif result == 2:
+		var pid := OS.create_process(BLENDER_EXE,["--python",paths["script"]])
+		_message("Opening Blender with the current 3D curve" if pid > 0 else "Could not start Blender")
+	else:
+		_message("Blender import failed: " + (str(output[0]).strip_edges() if not output.is_empty() else "could not reach the open window"))
 
 func _save_file(path: String) -> bool:
 	var names := ["active_curve"]
@@ -1141,11 +1361,12 @@ func _load_file(path: String) -> void:
 	if loaded.size() < 2:
 		_message("At least two valid frames are required")
 		return
+	_record_undo()
 	frames = loaded
 	other_curves.clear()
 	closed = bool(data.get("closed",false))
 	surface_enabled = bool(data.get("surface_enabled",false))
-	selected = -1
+	_select_only(-1)
 	surface_refine = clampi(int(data.get("surface_refine",1)),0,2)
 	surface_smooth = clampi(int(data.get("surface_smooth",20)),0,60)
 	surface_detail_field.value = surface_refine

@@ -75,21 +75,86 @@ func _check(editor: Control) -> void:
 	assert(FileAccess.file_exists(template_save_path))
 	var saved_template = JSON.parse_string(FileAccess.get_file_as_string(template_save_path))
 	assert(saved_template["frames"].size() == 8 and saved_template["layers"].is_empty())
-	assert(editor.frames.size() == 4 and editor.frames[0].position.is_equal_approx(Vector3(-2,-2,0)))
+	assert(editor.frames.size() == 8 and editor.frames[0].position.is_equal_approx(Vector3(-2,-2,0)))
+	assert(editor.frames[0].position.is_equal_approx(editor.frames[1].position))
+	assert(editor.frames[0].tangent.length() > 0.1 and editor.frames[1].tangent.length() > 0.1)
+	assert(not editor.frames[0].tangent.is_equal_approx(editor.frames[1].tangent))
+	assert(editor._sample_curves()["center"].size() == 4 * 36 + 1)
+	# The FRONT view must include both coincident frames even when one is deeper.
+	editor.frames[1].position.z += 2.0
+	var corner_screen: Vector2 = editor._project(editor.frames[0].position, 0)
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = corner_screen - Vector2(15, 15)
+	editor._mouse_button(press)
+	assert(editor.drag_mode == "box")
+	var move_box := InputEventMouseMotion.new()
+	move_box.position = corner_screen + Vector2(15, 15)
+	editor._mouse_motion(move_box)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.position = move_box.position
+	editor._mouse_button(release)
+	assert(editor.selected_frames.has(0) and editor.selected_frames.has(1))
+	assert(editor.selected_frames.size() == 2)
+	editor.frames[1].position.z -= 2.0
+	var second_corner: Vector3 = editor.frames[1].position
+	editor.frames[1].position = editor.camera.global_position.lerp(editor.frames[0].position, 0.8)
+	var perspective_point: Vector2 = editor._selection_projection(editor.frames[0].position, 3)
+	var perspective_hits: Array[int] = editor._box_selection_indices(perspective_point - Vector2(5, 5), perspective_point + Vector2(5, 5), 3)
+	assert(perspective_hits.has(0) and perspective_hits.has(1))
+	editor.frames[1].position = second_corner
+	var next_corner_screen: Vector2 = editor._project(editor.frames[2].position, 0)
+	editor._start_box_selection(next_corner_screen - Vector2(12, 12), 0, true)
+	editor.box_end = next_corner_screen + Vector2(12, 12)
+	editor._finish_box_selection()
+	assert(editor.selected_frames.has(0) and editor.selected_frames.has(1))
+	assert(editor.selected_frames.has(2) and editor.selected_frames.has(3))
+	editor.drag_mode = ""
+	editor._select_only(0)
+	var corner: Vector3 = editor.frames[0].position
+	editor._on_property_changed(corner.x + 0.5, 0)
+	assert(editor.frames[1].position.is_equal_approx(editor.frames[0].position))
+	editor._undo()
+	assert(editor.frames[0].position.is_equal_approx(corner))
+	editor._select_only(0)
+	editor._toggle_selected(2)
+	assert(editor.selected_frames.size() == 2)
+	assert(editor._move_indices().size() == 4)
+	editor._sync_properties()
+	assert(not editor.property_fields[3].editable)
+	editor.active_view = 0
+	editor.drag_mode = "point"
+	editor.drag_start = editor._project(editor.frames[0].position, 0)
+	editor.drag_positions.clear()
+	for index in editor._move_indices():
+		editor.drag_positions[index] = editor.frames[index].position
+	var motion := InputEventMouseMotion.new()
+	motion.position = editor.drag_start + Vector2(20, 0)
+	editor._mouse_motion(motion)
+	assert(editor.frames[0].position.is_equal_approx(editor.frames[1].position))
+	assert(editor.frames[2].position.is_equal_approx(editor.frames[3].position))
+	assert(editor.frames[0].position.x > corner.x)
+	editor._undo()
+	assert(editor.frames[0].position.is_equal_approx(corner))
+	editor.drag_mode = ""
+	editor._select_only(0)
 	editor.template_shape.select(2)
 	editor.template_a.value = 6.0
 	editor.template_b.value = 3.0
 	editor._apply_template()
-	assert(editor.frames.size() == 3)
+	assert(editor.frames.size() == 6)
 	editor.template_shape.select(3)
 	editor._apply_template()
-	assert(editor.frames.size() == 4 and is_equal_approx(editor.frames[0].position.x, -3.0))
+	assert(editor.frames.size() == 8 and is_equal_approx(editor.frames[0].position.x, -3.0))
 	editor.template_shape.select(4)
 	editor.template_a.value = 3.0
 	editor.template_sides.value = 7
 	editor.template_plane.select(1)
 	editor._apply_template()
-	assert(editor.frames.size() == 7 and is_equal_approx(editor.frames[0].position.y, 0.0))
+	assert(editor.frames.size() == 14 and is_equal_approx(editor.frames[0].position.y, 0.0))
 	assert(editor.other_curves.is_empty())
 	editor._toggle_surface()
 	assert(editor.surface_enabled and editor.surface_data.has("vertices"))
@@ -114,6 +179,8 @@ func _check(editor: Control) -> void:
 	var blender_paths: Dictionary = editor._write_blender_payload()
 	assert(FileAccess.file_exists(blender_paths["data"]))
 	assert(FileAccess.file_exists(blender_paths["script"]))
+	assert(FileAccess.file_exists(blender_paths["bridge"]))
+	assert(not FileAccess.get_file_as_string(blender_paths["script"]).contains("bpy.ops.object.delete"))
 	var payload = JSON.parse_string(FileAccess.get_file_as_string(blender_paths["data"]))
 	assert(payload["curves"].size() == 1 and payload["layers"].size() == 0)
 	assert(payload["surface"]["triangle_count"] > 0)

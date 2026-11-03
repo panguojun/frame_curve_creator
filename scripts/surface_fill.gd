@@ -66,21 +66,36 @@ func build(raw: PackedVector3Array, refine: int = 1, smooth: int = 20) -> Dictio
 	for _i in range(uv.size()):
 		neighbors.append({})
 	for k in range(0,triangles.size(),3):
-		for e in range(3):
-			var a := triangles[k+e]
-			var b := triangles[k+(e+1)%3]
-			neighbors[a][b] = true
-			neighbors[b][a] = true
-	for _iteration in range(clampi(smooth,0,100)):
-		var next_heights := heights.duplicate()
-		for i in range(heights.size()):
-			if fixed[i] != 0 or neighbors[i].is_empty():
-				continue
-			var total := 0.0
-			for neighbor in neighbors[i]:
-				total += heights[neighbor]
-			next_heights[i] = total/neighbors[i].size()
-		heights = next_heights
+		var a := triangles[k]
+		var b := triangles[k+1]
+		var c := triangles[k+2]
+		# Positive cotangent weights approximate the geometric Laplacian and
+		# avoid the valence bias of a plain neighbor average.
+		_add_cotangent_weight(neighbors, uv, b, c, a)
+		_add_cotangent_weight(neighbors, uv, c, a, b)
+		_add_cotangent_weight(neighbors, uv, a, b, c)
+	if smooth > 0:
+		var height_span := 0.0
+		for height in heights:
+			height_span = maxf(height_span, absf(height))
+		var tolerance := maxf(0.000001, height_span * 0.00001)
+		for _iteration in range(clampi(smooth * 12, 12, 720)):
+			var max_change := 0.0
+			for i in range(heights.size()):
+				if fixed[i] != 0 or neighbors[i].is_empty():
+					continue
+				var total := 0.0
+				var weight_sum := 0.0
+				for neighbor in neighbors[i]:
+					var weight: float = neighbors[i][neighbor]
+					total += heights[neighbor] * weight
+					weight_sum += weight
+				if weight_sum > 0.0:
+					var next_height := total / weight_sum
+					max_change = maxf(max_change, absf(next_height - heights[i]))
+					heights[i] = next_height
+			if max_change < tolerance:
+				break
 	var vertices := PackedVector3Array()
 	for i in range(uv.size()):
 		vertices.append(origin + axis_u*uv[i].x + axis_v*uv[i].y + normal*heights[i])
@@ -127,6 +142,18 @@ func build(raw: PackedVector3Array, refine: int = 1, smooth: int = 20) -> Dictio
 	if euler != 1 or boundary_edge_count < 3:
 		return {"error":"Surface topology is not a disk"}
 	return {"vertices":vertices,"indices":triangles,"boundary_count":boundary.size(),"boundary_edges":boundary_edge_count,"triangle_count":triangle_count,"projected_area":area,"euler":euler}
+
+func _add_cotangent_weight(neighbors: Array[Dictionary], uv: PackedVector2Array, a: int, b: int, opposite: int) -> void:
+	var va := uv[a] - uv[opposite]
+	var vb := uv[b] - uv[opposite]
+	var area2 := absf(va.cross(vb))
+	if area2 <= 0.0000000001:
+		return
+	var weight := maxf(va.dot(vb) / area2, 0.0)
+	if weight <= 0.0:
+		return
+	neighbors[a][b] = float(neighbors[a].get(b, 0.0)) + weight
+	neighbors[b][a] = float(neighbors[b].get(a, 0.0)) + weight
 
 func _midpoint(a: int, b: int, uv: PackedVector2Array, heights: PackedFloat32Array, fixed: PackedByteArray, boundary_edges: Dictionary, midpoint_map: Dictionary) -> int:
 	var key := _edge_key(a,b)
