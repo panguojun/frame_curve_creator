@@ -1,54 +1,44 @@
-# 2D Frame Curve Board
+# 3D Frame Curve Board
 
 A small Godot 4 editor for a 2D cubic Hermite curve controlled by coordinate frames. The blue curve is an editing guide; the green polyline is the generated profile. The current executable is [build/Frame2DCurveBoard_AnalyticFit.exe](build/Frame2DCurveBoard_AnalyticFit.exe).
-<img width="1581" height="988" alt="屏幕截图 2026-10-30 140740" src="https://github.com/user-attachments/assets/061b6f03-6ee6-4177-8a7f-a346ce921a9f" />
 <img width="1282" height="839" alt="8b9d310daacab8a6105500c070686635" src="https://github.com/user-attachments/assets/2d4a969a-9d9b-4925-9db6-2b3f29062aae" />
 
+A Godot 4 editor for spatial cubic Hermite curves. The Windows executable is `Frame3DCurveBoard.exe` in the project root. The scene is `scenes/main_3d.tscn`.
 
-## Edit
+## Workspace
 
-| Action | Control |
-| --- | --- |
-| Move frame | Drag its center |
-| Change tangent direction and scale | Drag the blue handle; its distance from the frame sets `t` |
-| Change direction without changing scale | Right drag near a frame or use Q/E |
-| Change normal scale `n` | Drag the green handle; it can reach 0 |
-| Set selected normal scale to 0 or restore it to 1 | N |
-| Change base offset radius `r` | Alt + drag the green handle |
-| Insert a frame on the blue or green curve | Click **Frame**, then click the curve; F or double click also works |
-| Add a frame at the end | A |
-| Delete selected frame | Delete (at least two remain) |
-| Move selected frame precisely | Arrow keys; hold Shift for a larger step |
-| Toggle open or closed curve | **Open/Closed** toolbar button or C |
-| Pan / zoom | Middle drag / mouse wheel |
-| Toggle green offsets / red control polygon | O / P |
-| Reset example | R |
-| Open export dialog | **Export...** or X |
-| Open the current curve directly in Blender | **Blender** toolbar button |
-| Fit an analytic curve to the current profile | **Fit** toolbar button |
+The left rail contains Add, Insert, Delete, Close, Template, Surface, Blender, Export, Open, Reset, and ZEN. The center contains FRONT, TOP, RIGHT and PERSPECTIVE views in a 2 by 2 grid. The right Properties panel edits the selected control frame's position and tangent as XYZ values.
 
-The frame label shows `t` (tangent scale), `n` (normal scale), `r` (base offset radius), and `w` (reserved weight). Tangent scale changes the Hermite derivative magnitude and therefore the curve shape. The offset width at each frame is `n × r`; it is interpolated along each span. **The default is `n = 0` at every frame**, producing one green profile polyline at the blue guide's position. Drag a green handle outward to create two boundary polylines. The blue centerline is only an editing guide and is never exported. At `n = 0`, the green control stays slightly away from the center point so it remains draggable. Weight is currently metadata; the curve evaluator remains cubic Hermite.
+| View | Horizontal axis | Vertical axis | Hidden coordinate |
+| --- | --- | --- | --- |
+| FRONT | X | Y | Z |
+| TOP | X | Z | Y |
+| RIGHT | Z | Y | X |
+| PERSPECTIVE | Orbit camera | | |
 
-Inserting a frame splits its cubic span at the selected parameter. Its initial position, tangent and radius follow the current curve, and the centerline stays exactly the same until you edit it. Clicking a green offset creates the frame at the corresponding centerline point.
+Drag a point to move it; the view's hidden coordinate stays unchanged. Drag a blue handle to change its three dimensional tangent. The single editable curve is blue.
 
-Closing adds a smooth Hermite span from the last frame back to the first. Drag the endpoint tangents and their lengths to shape the closing span. The exported closed curves repeat their starting point.
+- **Left drag** a point or blue tangent handle; left drag in PERSPECTIVE to orbit.
+- **Middle drag** to pan an orthographic view; **wheel** to zoom the hovered view.
+- **A** add a frame; **F** then click the blue curve to insert; **Delete** remove a frame.
+- **C** close/open the active curve; **R** reset the scene; **X** export; **O** open saved JSON.
+- **T** opens Template; **S** toggles the surface without selecting a frame; **B** opens the scene in Blender.
+- **F11** or the ZEN button enters full screen focus mode; **F11** or **Esc** exits.
 
-## Analytic curve fitting
+## Templates
 
-Click **Fit** to identify the closest line, circle, or ellipse for the current green production polyline. If normal scaling creates two boundaries, choose which boundary to fit. The dialog lists available models by fit score and shows each model's root mean square (RMS) geometric error in editor units. A small complexity penalty favors a simpler model when errors are close; the listed RMS remains the actual geometric error. You can choose a different model before applying it.
+Click **Template** and choose Circle, Square, Triangle, Rectangle, or Regular polygon. Choose the FRONT/XY, TOP/XZ, or RIGHT/ZY plane. Set radius, width/height, or side count in the dialog. The shape replaces the current curve. After choosing a template, select Save to write the current editable scene as JSON, Don't Save to replace it immediately, or Cancel to keep the current curve. A failed or canceled save leaves the current curve unchanged. The new shape is a closed curve whose frames and tangents can be edited. Square, triangle, rectangle and polygon templates begin with zero tangents to keep their edges straight. Circle uses cubic Hermite tangent values for a close circular approximation.
 
-Confirming the fit projects the key frames onto the selected analytic curve, aligns their tangent directions, and adjusts tangent lengths from the spacing between neighboring frames. When fitting a boundary, the frame centers are offset so that the chosen boundary passes through the projected points. The Hermite curve remains editable: drag frames and tangent handles as before to refine the shape. This is a starting approximation; the sampled Hermite spans do not become exact analytic geometry.
+## Triangulated surface from a closed 3D curve
 
-## Export
+Click **Surface** (or press **S**) at any time; no frame selection is needed. An open curve closes automatically before the surface is generated. The editor projects the sampled loop to a stable local plane, rejects degenerate or self intersecting projections, triangulates the interior while keeping the loop as the boundary, splits edges by spatial length, flips interior edges when triangle quality improves, relaxes interior vertices with orientation checks, and solves a smooth harmonic height field with fixed 3D boundary heights. The surface updates when control frames move. The Properties panel offers Detail (0–2) and Smooth (0–60) controls. Choosing another template clears the previous curve and its surface.
 
-Click **Export...**, choose a format in the file dialog, then choose a destination and filename:
+This is a boundary interpolating triangle mesh, not an exact rational NURBS surface. A nonplanar closed loop does not determine a unique surface; this tool chooses a deterministic height field over its projection. Curves whose chosen projection self intersects cannot be filled by this method. The construction follows the boundary validation and constrained triangulation principles used in AnalyticSurfaceStudio, adapted here to a spatial loop without a source UV patch.
 
-| Format | Contents | Use |
-| --- | --- | --- |
-| SVG | Standard `<path>` elements for the production boundaries | In Blender: File → Import → Scalable Vector Graphics (.svg); creates curve objects |
-| OBJ | Standard Wavefront vertices and `l` line elements for the boundaries | In Blender: File → Import → Wavefront (.obj); creates mesh edges |
-| CSV | Production polyline names and sample coordinates | Numerical analysis and other CAD tools |
-| JSON | Production polyline names, sample coordinates and closure flag | Inspect or transfer the generated profile |
-| PNG | Clean raster rendering of the production polylines | Preview or illustration |
+## Blender and export
 
-All formats export two production polylines when the normal offset has nonzero width, or one merged production polyline when every normal scale is zero. The blue centerline is not present in any exported file. The **O** key changes editor visibility only; it does not change exported geometry. SVG and OBJ use sampled polylines, so they preserve the displayed geometry to the current sampling resolution rather than exporting native Hermite control data. SVG uses screen-style Y downward. OBJ flips Y so its coordinates follow the usual 3D Y-up convention. All exported coordinates use editor units; choose the scale you need after import.
+The **Blender** button looks for `C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe`. It writes the current scene to Godot's user data `blender_exports` folder and launches Blender with a Python import script. The scene curve becomes a native 3D Blender Curve with a POLY spline and no bevel. Enabled surfaces become Blender Mesh objects with triangle faces. The button opens a new Blender process; it does not change your existing Blender scene.
+
+**Export** writes JSON with the editable frame positions and tangents, closure flag, sampled points, and generated surface vertices/triangles, or OBJ with 3D `v` and `l` records for the curve plus `f` records for the generated surface. Curve export uses 36 samples per Hermite span; surface boundaries use an adaptive rate capped near 512 points for interactive updates. Existing `frame_curve_3d_v1` JSON remains loadable. When an older file contains several layers, only its main curve is opened; old normal offset fields are ignored. Inserting a frame samples the curve position and derivative, but can slightly change adjacent spans because tangents are shared between spans.
+
+The perspective view keeps its grid, axes, camera and curve nodes alive while editing. Only curve mesh data and marker positions are updated, avoiding the repeated node deletion that caused flashing during dragging.
