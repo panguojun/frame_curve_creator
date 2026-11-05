@@ -3,6 +3,7 @@ extends Control
 class CurveFrame:
 	var position: Vector3
 	var tangent: Vector3
+	var normal: Vector3 = Vector3.ZERO
 	func _init(p: Vector3, t: Vector3) -> void:
 		position = p
 		tangent = t
@@ -114,6 +115,7 @@ var background_curve_node: MeshInstance3D
 var surface_node: MeshInstance3D
 var background_surface_nodes: Array[MeshInstance3D] = []
 var tangent_node: MeshInstance3D
+var normal_node: MeshInstance3D
 var marker_nodes: Array[MeshInstance3D] = []
 var marker_mesh: SphereMesh
 var marker_material: StandardMaterial3D
@@ -138,6 +140,9 @@ var old_window_mode := DisplayServer.WINDOW_MODE_WINDOWED
 var properties: Control
 var property_title: Label
 var property_fields: Array[SpinBox] = []
+var tangent_checkbox: CheckBox
+var torsion_checkbox: CheckBox
+var normal_fields: Array[SpinBox] = []
 var updating_fields := false
 var surface_info: Label
 var surface_detail_field: SpinBox
@@ -146,7 +151,9 @@ var surface_smooth_field: SpinBox
 func _copy_frames(source: Array) -> Array[CurveFrame]:
 	var result: Array[CurveFrame] = []
 	for frame in source:
-		result.append(CurveFrame.new(frame.position, frame.tangent))
+		var copy := CurveFrame.new(frame.position, frame.tangent)
+		copy.normal = frame.normal
+		result.append(copy)
 	return result
 
 func _snapshot() -> Dictionary:
@@ -451,19 +458,19 @@ func _make_properties() -> void:
 	property_title.position = Vector2(16, 20)
 	property_title.add_theme_font_size_override("font_size", 17)
 	properties.add_child(property_title)
-	var headings := ["POSITION / XYZ", "TANGENT / XYZ"]
+	var headings := ["POSITION / XYZ", "TANGENT / XYZ", "NORMAL / XYZ"]
 	var axes := ["X", "Y", "Z"]
-	for group in range(2):
+	for group in range(3):
 		var heading := Label.new()
 		heading.text = headings[group]
-		heading.position = Vector2(16, 76 + group*210)
+		heading.position = Vector2(16, 56 + group*135)
 		heading.add_theme_font_size_override("font_size", 13)
 		properties.add_child(heading)
 		for axis in range(3):
 			var row := group*3 + axis
 			var label := Label.new()
 			label.text = axes[axis]
-			label.position = Vector2(18, 111 + group*210 + axis*50)
+			label.position = Vector2(18, 83 + group*135 + axis*36)
 			label.add_theme_font_size_override("font_size", 15)
 			properties.add_child(label)
 			var field := SpinBox.new()
@@ -472,46 +479,65 @@ func _make_properties() -> void:
 			field.step = 0.01
 			field.allow_greater = true
 			field.allow_lesser = true
-			field.position = Vector2(54, 104 + group*210 + axis*50)
-			field.size = Vector2(PROP_W-72, 34)
+			field.position = Vector2(54, 76 + group*135 + axis*36)
+			field.size = Vector2(PROP_W-72, 31)
 			field.value_changed.connect(_on_property_changed.bind(row))
 			properties.add_child(field)
-			property_fields.append(field)
+			if group == 2:
+				normal_fields.append(field)
+			else:
+				property_fields.append(field)
+	tangent_checkbox = CheckBox.new()
+	tangent_checkbox.text = "Tangent"
+	tangent_checkbox.button_pressed = true
+	tangent_checkbox.position = Vector2(5, HEADER_H + 8)
+	tangent_checkbox.size = Vector2(RAIL_W - 10, 28)
+	tangent_checkbox.toggled.connect(_on_handle_visibility_changed)
+	add_child(tangent_checkbox)
+	torsion_checkbox = CheckBox.new()
+	torsion_checkbox.text = "Torsion"
+	torsion_checkbox.position = Vector2(5, HEADER_H + 43)
+	torsion_checkbox.size = Vector2(RAIL_W - 10, 28)
+	torsion_checkbox.toggled.connect(_on_handle_visibility_changed)
+	add_child(torsion_checkbox)
 	var hint := Label.new()
 	hint.text = "Drag empty space to box-select.\nAlt+drag boxes in PERSPECTIVE.\nShift adds to the selection."
-	hint.position = Vector2(16, 506)
+	hint.position = Vector2(16, 460)
 	properties.add_child(hint)
 	surface_info = Label.new()
-	surface_info.position = Vector2(16, 558)
+	surface_info.position = Vector2(16, 525)
 	surface_info.text = "SURFACE  off"
 	properties.add_child(surface_info)
 	var detail_label := Label.new()
 	detail_label.text = "Detail"
-	detail_label.position = Vector2(16, 598)
+	detail_label.position = Vector2(16, 565)
 	properties.add_child(detail_label)
 	surface_detail_field = SpinBox.new()
 	surface_detail_field.min_value = 0
 	surface_detail_field.max_value = 2
 	surface_detail_field.step = 1
 	surface_detail_field.value = surface_refine
-	surface_detail_field.position = Vector2(90, 590)
+	surface_detail_field.position = Vector2(90, 557)
 	surface_detail_field.size = Vector2(PROP_W-108,32)
 	surface_detail_field.value_changed.connect(_on_surface_detail_changed)
 	properties.add_child(surface_detail_field)
 	var smooth_label := Label.new()
 	smooth_label.text = "Smooth"
-	smooth_label.position = Vector2(16, 641)
+	smooth_label.position = Vector2(16, 605)
 	properties.add_child(smooth_label)
 	surface_smooth_field = SpinBox.new()
 	surface_smooth_field.min_value = 0
 	surface_smooth_field.max_value = 60
 	surface_smooth_field.step = 1
 	surface_smooth_field.value = surface_smooth
-	surface_smooth_field.position = Vector2(90, 633)
+	surface_smooth_field.position = Vector2(90, 597)
 	surface_smooth_field.size = Vector2(PROP_W-108,32)
 	surface_smooth_field.value_changed.connect(_on_surface_smooth_changed)
 	properties.add_child(surface_smooth_field)
 	_layout_properties()
+
+func _on_handle_visibility_changed(_enabled: bool) -> void:
+	_refresh()
 
 func _on_surface_detail_changed(value: float) -> void:
 	if updating_fields or surface_refine == int(value):
@@ -538,6 +564,8 @@ func _layout_properties() -> void:
 	if properties == null:
 		return
 	properties.visible = not zen_mode
+	tangent_checkbox.visible = not zen_mode
+	torsion_checkbox.visible = not zen_mode
 	properties.position = Vector2(size.x-PROP_W, HEADER_H)
 	properties.size = Vector2(PROP_W, maxf(100.0, size.y-HEADER_H))
 
@@ -548,11 +576,16 @@ func _sync_properties() -> void:
 	property_title.text = "%d FRAMES SELECTED" % selected_frames.size() if selected_frames.size() > 1 else ("FRAME %d" % (selected+1) if selected >= 0 else "SELECT A FRAME")
 	for field in property_fields:
 		field.editable = selected >= 0 and selected_frames.size() <= 1
+	for field in normal_fields:
+		field.editable = selected >= 0 and selected_frames.size() <= 1 and torsion_checkbox.button_pressed
 	if selected >= 0 and selected_frames.size() <= 1:
 		var f := frames[selected]
 		var values := [f.position.x, f.position.y, f.position.z, f.tangent.x, f.tangent.y, f.tangent.z]
 		for i in range(6):
 			property_fields[i].value = values[i]
+		var n := _frame_normal(f)
+		for i in range(3):
+			normal_fields[i].value = n[i]
 	if surface_info != null:
 		if not surface_enabled:
 			surface_info.text = "SURFACE  off"
@@ -566,19 +599,54 @@ func _on_property_changed(value: float, row: int) -> void:
 	if updating_fields or selected < 0 or selected_frames.size() > 1:
 		return
 	var f := frames[selected]
-	if not is_equal_approx((f.position if row < 3 else f.tangent)[row if row < 3 else row-3], value):
-		_record_undo()
+	if row >= 6 and not torsion_checkbox.button_pressed:
+		return
+	var prior: Vector3 = f.position if row < 3 else f.tangent if row < 6 else _frame_normal(f)
+	var axis := row % 3
+	if is_equal_approx(prior[axis], value):
+		return
+	_record_undo()
 	if row < 3:
 		var delta := value - f.position[row]
 		for index in _move_indices():
 			var p := frames[index].position
 			p[row] += delta
 			frames[index].position = p
-	else:
+	elif row < 6:
 		var t := f.tangent
 		t[row-3] = value
 		f.tangent = t
+	else:
+		prior[axis] = value
+		f.normal = _orthogonal_normal(f, prior)
 	_refresh()
+
+func _boundary_normal() -> Vector3:
+	var summed := Vector3.ZERO
+	for i in range(frames.size()):
+		summed += frames[i].position.cross(frames[(i+1) % frames.size()].position)
+	return summed.normalized() if summed.length_squared() > 0.000001 else Vector3.BACK
+
+func _frame_normal(frame: CurveFrame) -> Vector3:
+	if frame.normal.length_squared() > 0.000001:
+		return _orthogonal_normal(frame, frame.normal)
+	var normal := _boundary_normal()
+	var tangent := frame.tangent.normalized()
+	normal -= tangent * normal.dot(tangent)
+	if normal.length_squared() < 0.000001:
+		normal = tangent.cross(Vector3.UP)
+	if normal.length_squared() < 0.000001:
+		normal = Vector3.BACK
+	return normal.normalized()
+
+func _orthogonal_normal(frame: CurveFrame, direction: Vector3) -> Vector3:
+	var tangent := frame.tangent.normalized()
+	var result := direction - tangent * direction.dot(tangent)
+	return result.normalized() if result.length_squared() > 0.000001 else _frame_normal_fallback(tangent)
+
+func _frame_normal_fallback(tangent: Vector3) -> Vector3:
+	var axis := Vector3.UP if absf(tangent.dot(Vector3.UP)) < 0.9 else Vector3.BACK
+	return (axis - tangent * axis.dot(tangent)).normalized()
 
 func _layout_preview() -> void:
 	if preview == null:
@@ -621,6 +689,19 @@ func _unproject(p: Vector2, index: int, old: Vector3) -> Vector3:
 		1: return Vector3(a.x, old.y, -a.y)
 		_: return Vector3(old.x, -a.y, a.x)
 
+# Unproject a screen position in the perspective view onto a plane through
+# `anchor` perpendicular to the camera view direction. Used to drag control
+# points in 3D by intersecting the mouse ray with that plane.
+func _perspective_drag_plane(screen_pos: Vector2, anchor: Vector3) -> Vector3:
+	if preview == null or camera == null or viewport_3d == null:
+		return anchor
+	var local := (screen_pos - preview.position) * (Vector2(viewport_3d.size) / preview.size)
+	var ray = camera.project_ray_2d(local)
+	var plane_normal := -camera.global_transform.basis.z
+	var plane := Plane(plane_normal, anchor)
+	var hit = plane.intersects_ray(ray.position, ray.direction)
+	return hit if hit != null else anchor
+
 func _hermite(a: Vector3, b: Vector3, ta: Vector3, tb: Vector3, u: float) -> Vector3:
 	var u2 := u * u
 	var u3 := u2 * u
@@ -655,6 +736,13 @@ func _surface_boundary_points(frame_set: Array, is_closed: bool) -> PackedVector
 	var steps := clampi(int(512.0/maxi(frame_set.size(),1)),8,24)
 	return _sample_frame_curve(frame_set,is_closed,steps)
 
+func _normal_controls(frame_set: Array) -> Array:
+	var controls := []
+	for frame in frame_set:
+		if frame.normal.length_squared() > 0.000001:
+			controls.append({"position":frame.position,"normal":_orthogonal_normal(frame,frame.normal)})
+	return controls
+
 func _clamp_to_view(p: Vector2, index: int) -> Vector2:
 	var r := _panel_rect(index)
 	return Vector2(clampf(p.x, r.position.x, r.end.x), clampf(p.y, r.position.y + 26.0, r.end.y))
@@ -686,8 +774,7 @@ func _finish_box_selection() -> void:
 			if not selected_frames.has(index):
 				selected_frames.append(index)
 		selected = selected_frames.back() if not selected_frames.is_empty() else -1
-	_sync_properties()
-	queue_redraw()
+	_refresh()
 	box_overlay.queue_redraw()
 
 func _draw_box_overlay() -> void:
@@ -723,14 +810,29 @@ func _draw_toolbar() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(15, 28), "3D FRAME CURVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, Vector2(size.x-PROP_W+16, 28), "PROPERTIES", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("b6c5d8"))
 	var labels := ["ADD", "INSERT", "DELETE", "CLOSE", "TEMPLATE", "SURFACE", "BLENDER", "EXPORT", "OPEN", "RESET", "ZEN", "UNDO"]
+	var active_states := [false, insert_mode, false, closed, false, surface_enabled, false, false, false, false, false, false]
+	var hovered := _toolbar_hover_index
 	for j in range(labels.size()):
 		var box := _tool_rect(j)
-		draw_rect(box, Color("3b618a") if (j == 1 and insert_mode) or (j == 3 and closed) or (j == 5 and surface_enabled) else Color("2c394e"))
-		draw_rect(box, Color("657891"), false, 1.0)
-		draw_string(ThemeDB.fallback_font, box.position + Vector2(10, 25), labels[j], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+		var bg: Color
+		if active_states[j]:
+			bg = Color("3a7ec2")
+		elif j == hovered:
+			bg = Color("32425a")
+		else:
+			bg = Color("222d3d")
+		draw_rect(box, bg)
+		# Left accent bar for active state.
+		if active_states[j]:
+			draw_rect(Rect2(box.position, Vector2(3, box.size.y)), Color("6cb4ff"))
+		draw_rect(box, Color("3a4a60"), false, 1.0)
+		var text_color := Color.WHITE if active_states[j] else Color("c8d4e4")
+		draw_string(ThemeDB.fallback_font, box.position + Vector2(14, 24), labels[j], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_color)
+
+var _toolbar_hover_index := -1
 
 func _tool_rect(j: int) -> Rect2:
-	return Rect2(9, HEADER_H + 12 + j*49, RAIL_W-18, 40)
+	return Rect2(9, HEADER_H + 96 + j*40, RAIL_W-18, 34)
 
 func _toolbar_action(p: Vector2) -> bool:
 	if zen_mode or p.x > RAIL_W or p.y < HEADER_H:
@@ -779,10 +881,16 @@ func _draw_ortho(index: int, curves: Dictionary) -> void:
 	for j in range(frames.size()):
 		var f := frames[j]
 		var p := _project(f.position, index)
-		var t := _project(f.position + f.tangent * HANDLE_FACTOR, index)
 		if r.grow(-6).has_point(p):
-			draw_line(p, t, BLUE, 1.5)
-			draw_circle(t, 5, BLUE)
+			if selected_frames.size() == 1 and selected == j:
+				if tangent_checkbox.button_pressed:
+					var t := _project(f.position + f.tangent * HANDLE_FACTOR, index)
+					draw_line(p, t, BLUE, 1.5)
+					draw_circle(t, 5, BLUE)
+				if torsion_checkbox.button_pressed:
+					var n := _project(f.position + _frame_normal(f) * 0.8, index)
+					draw_line(p, n, YELLOW, 1.5)
+					draw_circle(n, 6, YELLOW)
 			draw_circle(p, 7 if selected_frames.has(j) else 5, YELLOW if selected_frames.has(j) else GREEN)
 			draw_string(ThemeDB.fallback_font, p + Vector2(10, -7), str(j+1), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
 
@@ -844,7 +952,30 @@ func _mouse_button(e: InputEventMouseButton) -> void:
 		if e.alt_pressed:
 			_start_box_selection(e.position, v, e.shift_pressed)
 		elif v == 3:
-			drag_mode = "orbit"
+			# In the perspective view, dragging a control point takes priority
+			# over orbiting; dragging empty space orbits the camera.
+			var hit3d := _hit(e.position, v, e.shift_pressed)
+			if hit3d["index"] < 0:
+				var other_hit3d := _hit_other(e.position, v)
+				if other_hit3d["layer"] >= 0:
+					_activate_other(other_hit3d["layer"])
+					hit3d = _hit(e.position, v, e.shift_pressed)
+			if hit3d["index"] >= 0:
+				if e.shift_pressed and hit3d["part"] == "point":
+					_toggle_selected(hit3d["index"])
+					drag_mode = ""
+				else:
+					_select_only(hit3d["index"])
+					drag_mode = hit3d["part"]
+				drag_start = e.position
+				drag_positions.clear()
+				if drag_mode == "point":
+					for index in _move_indices():
+						drag_positions[index] = frames[index].position
+				if drag_mode != "":
+					_refresh()
+			else:
+				drag_mode = "orbit"
 		elif insert_mode or e.double_click:
 			_insert_nearest(e.position, v)
 			insert_mode = false
@@ -872,7 +1003,7 @@ func _mouse_button(e: InputEventMouseButton) -> void:
 				for index in _move_indices():
 					drag_positions[index] = frames[index].position
 			if drag_mode != "box":
-				_sync_properties()
+				_refresh()
 	elif e.button_index == MOUSE_BUTTON_MIDDLE:
 		if e.pressed and v >= 0 and v < 3:
 			active_view = v
@@ -890,6 +1021,16 @@ func _mouse_button(e: InputEventMouseButton) -> void:
 	queue_redraw()
 
 func _mouse_motion(e: InputEventMouseMotion) -> void:
+	# Update toolbar hover.
+	var hover := -1
+	if not zen_mode and e.position.x <= RAIL_W and e.position.y >= HEADER_H:
+		for j in range(12):
+			if _tool_rect(j).has_point(e.position):
+				hover = j
+				break
+	if hover != _toolbar_hover_index:
+		_toolbar_hover_index = hover
+		queue_redraw()
 	if drag_mode == "box":
 		box_end = _clamp_to_view(e.position, active_view)
 		box_overlay.queue_redraw()
@@ -899,7 +1040,7 @@ func _mouse_motion(e: InputEventMouseMotion) -> void:
 		_update_camera()
 	elif drag_mode == "pan" and active_view < 3:
 		view_pan[active_view] += e.relative
-	elif selected >= 0 and active_view < 3 and drag_mode != "":
+	elif selected >= 0 and drag_mode != "" and (active_view < 3 or active_view == 3):
 		var f := frames[selected]
 		match drag_mode:
 			"point":
@@ -907,15 +1048,41 @@ func _mouse_motion(e: InputEventMouseMotion) -> void:
 					if not drag_positions.has("recorded"):
 						_record_undo()
 						drag_positions["recorded"] = true
-					var delta := _unproject(e.position, active_view, Vector3.ZERO) - _unproject(drag_start, active_view, Vector3.ZERO)
-					for index in drag_positions:
-						if index is int:
-							frames[index].position = drag_positions[index] + delta
+					if active_view < 3:
+						var delta := _unproject(e.position, active_view, Vector3.ZERO) - _unproject(drag_start, active_view, Vector3.ZERO)
+						for index in drag_positions:
+							if index is int:
+								frames[index].position = drag_positions[index] + delta
+					else:
+						var anchor_index := selected
+						if drag_positions.has(anchor_index):
+							var anchor: Vector3 = drag_positions[anchor_index]
+							var hit_now := _perspective_drag_plane(e.position, anchor)
+							var hit_start := _perspective_drag_plane(drag_start, anchor)
+							var delta3 := hit_now - hit_start
+							for index in drag_positions:
+								if index is int:
+									frames[index].position = drag_positions[index] + delta3
 			"tangent":
 				if not drag_positions.has("recorded"):
 					_record_undo()
 					drag_positions["recorded"] = true
-				f.tangent = (_unproject(e.position, active_view, f.position + f.tangent*HANDLE_FACTOR) - f.position) / HANDLE_FACTOR
+				if active_view < 3:
+					f.tangent = (_unproject(e.position, active_view, f.position + f.tangent*HANDLE_FACTOR) - f.position) / HANDLE_FACTOR
+				else:
+					var tip := _perspective_drag_plane(e.position, f.position)
+					f.tangent = (tip - f.position) / HANDLE_FACTOR
+			"normal":
+				if not drag_positions.has("recorded"):
+					_record_undo()
+					drag_positions["recorded"] = true
+				var next := Vector3.ZERO
+				if active_view < 3:
+					next = _unproject(e.position, active_view, f.position + _frame_normal(f)*0.8) - f.position
+				else:
+					next = _perspective_drag_plane(e.position, f.position) - f.position
+				if next.length_squared() > 0.000001:
+					f.normal = _orthogonal_normal(f, next)
 		_refresh()
 	if drag_mode != "":
 		queue_redraw()
@@ -933,12 +1100,17 @@ func _hit(p: Vector2, v: int, prefer_unselected: bool = false) -> Dictionary:
 	var result := {"index": -1, "part": ""}
 	for j in range(frames.size()):
 		var f := frames[j]
-		var handles := [f.position, f.position + f.tangent*HANDLE_FACTOR]
-		for k in range(2):
-			var d := p.distance_to(_project(handles[k], v))
-			if d < best or (prefer_unselected and k == 0 and is_equal_approx(d,best) and not selected_frames.has(j)):
+		var handles := [{"position":f.position,"part":"point"}]
+		if selected_frames.size() == 1 and selected == j:
+			if tangent_checkbox.button_pressed:
+				handles.append({"position":f.position + f.tangent*HANDLE_FACTOR,"part":"tangent"})
+			if torsion_checkbox.button_pressed:
+				handles.append({"position":f.position + _frame_normal(f)*0.8,"part":"normal"})
+		for handle in handles:
+			var d := p.distance_to(_project(handle["position"], v))
+			if d < best or (prefer_unselected and handle["part"] == "point" and is_equal_approx(d,best) and not selected_frames.has(j)):
 				best = d
-				result = {"index": j, "part": ["point", "tangent"][k]}
+				result = {"index": j, "part": handle["part"]}
 	return result
 
 func _hit_other(p: Vector2, v: int) -> Dictionary:
@@ -991,13 +1163,18 @@ func _insert_nearest(p: Vector2, v: int) -> void:
 	_record_undo()
 	selected = best_segment+1
 	selected_frames = [selected]
-	frames.insert(selected, CurveFrame.new(pos,tan))
+	var inserted := CurveFrame.new(pos,tan)
+	if a.normal.length_squared() > 0.000001 or b.normal.length_squared() > 0.000001:
+		inserted.normal = _orthogonal_normal(inserted,_frame_normal(a).lerp(_frame_normal(b),best_u))
+	frames.insert(selected, inserted)
 	_refresh()
 
 func _add_frame() -> void:
 	_record_undo()
 	var last: CurveFrame = frames.back()
-	frames.append(CurveFrame.new(last.position + last.tangent.normalized()*2.0, last.tangent))
+	var added := CurveFrame.new(last.position + last.tangent.normalized()*2.0, last.tangent)
+	added.normal = last.normal
+	frames.append(added)
 	selected = frames.size()-1
 	selected_frames = [selected]
 	_refresh()
@@ -1147,6 +1324,9 @@ func _build_static_3d() -> void:
 	tangent_node = MeshInstance3D.new()
 	tangent_node.material_override = _line_material(BLUE)
 	geometry_root.add_child(tangent_node)
+	normal_node = MeshInstance3D.new()
+	normal_node.material_override = _line_material(YELLOW)
+	geometry_root.add_child(normal_node)
 	marker_mesh = SphereMesh.new()
 	marker_mesh.radius = 0.075
 	marker_mesh.height = 0.15
@@ -1155,7 +1335,7 @@ func _build_static_3d() -> void:
 
 func _update_dynamic_3d() -> void:
 	if surface_enabled:
-		surface_data = surface_builder.build(_surface_boundary_points(frames,closed),surface_refine,surface_smooth) if closed else {"error":"Curve is open"}
+		surface_data = surface_builder.build(_surface_boundary_points(frames,closed),surface_refine,surface_smooth,_normal_controls(frames)) if closed else {"error":"Curve is open"}
 	else:
 		surface_data = {}
 	var error_text := str(surface_data.get("error",""))
@@ -1176,7 +1356,7 @@ func _update_dynamic_3d() -> void:
 		var layer := other_curves[layer_index]
 		if layer.get("surface",false) and layer["closed"]:
 			if not layer.has("surface_mesh") or layer["surface_mesh"] == null:
-				var data: Dictionary = surface_builder.build(_surface_boundary_points(layer["frames"],layer["closed"]),surface_refine,surface_smooth)
+				var data: Dictionary = surface_builder.build(_surface_boundary_points(layer["frames"],layer["closed"]),surface_refine,surface_smooth,_normal_controls(layer["frames"]))
 				layer["surface_data"] = data
 				layer["surface_mesh"] = _surface_mesh(data) if data.has("vertices") else null
 				other_curves[layer_index] = layer
@@ -1193,10 +1373,17 @@ func _update_dynamic_3d() -> void:
 	background_curve_node.mesh = _line_mesh(background_segments,true) if not background_segments.is_empty() else null
 	curve_node.mesh = _line_mesh(c["center"])
 	var tangent_points := PackedVector3Array()
-	for f in frames:
-		tangent_points.append(f.position)
-		tangent_points.append(f.position+f.tangent*HANDLE_FACTOR)
-	tangent_node.mesh = _line_mesh(tangent_points, true)
+	var normal_points := PackedVector3Array()
+	if selected_frames.size() == 1 and selected >= 0:
+		var f := frames[selected]
+		if tangent_checkbox.button_pressed:
+			tangent_points.append(f.position)
+			tangent_points.append(f.position+f.tangent*HANDLE_FACTOR)
+		if torsion_checkbox.button_pressed:
+			normal_points.append(f.position)
+			normal_points.append(f.position+_frame_normal(f)*0.8)
+	tangent_node.mesh = _line_mesh(tangent_points, true) if not tangent_points.is_empty() else null
+	normal_node.mesh = _line_mesh(normal_points, true) if not normal_points.is_empty() else null
 	while marker_nodes.size() < frames.size():
 		var marker := MeshInstance3D.new()
 		marker.mesh = marker_mesh
@@ -1278,7 +1465,7 @@ func _save_file(path: String) -> bool:
 	var names := ["active_curve"]
 	var sets := [_sample_frame_curve(frames,closed)]
 	var closures := [closed]
-	var export_surface: Dictionary = surface_builder.build(_surface_boundary_points(frames,closed),surface_refine,surface_smooth) if surface_enabled and closed else {}
+	var export_surface: Dictionary = surface_builder.build(_surface_boundary_points(frames,closed),surface_refine,surface_smooth,_normal_controls(frames)) if surface_enabled and closed else {}
 	var surface_sets: Array[Dictionary] = []
 	if export_surface.has("vertices"):
 		surface_sets.append({"name":"active_surface","data":export_surface})
@@ -1287,7 +1474,7 @@ func _save_file(path: String) -> bool:
 		sets.append(_sample_frame_curve(other_curves[i]["frames"],other_curves[i]["closed"]))
 		closures.append(other_curves[i]["closed"])
 		if other_curves[i].get("surface",false) and other_curves[i]["closed"]:
-			var layer_surface: Dictionary = surface_builder.build(_surface_boundary_points(other_curves[i]["frames"],other_curves[i]["closed"]),surface_refine,surface_smooth)
+			var layer_surface: Dictionary = surface_builder.build(_surface_boundary_points(other_curves[i]["frames"],other_curves[i]["closed"]),surface_refine,surface_smooth,_normal_controls(other_curves[i]["frames"]))
 			if layer_surface.has("vertices"):
 				surface_sets.append({"name":"surface_curve_%d" % (i+1),"data":layer_surface})
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -1317,12 +1504,12 @@ func _save_file(path: String) -> bool:
 	else:
 		var frame_data := []
 		for f in frames:
-			frame_data.append({"position":_vec(f.position),"tangent":_vec(f.tangent)})
+			frame_data.append({"position":_vec(f.position),"tangent":_vec(f.tangent),"normal":_vec(f.normal)})
 		var layer_data := []
 		for layer in other_curves:
 			var layer_frames := []
 			for f in layer["frames"]:
-				layer_frames.append({"position":_vec(f.position),"tangent":_vec(f.tangent)})
+				layer_frames.append({"position":_vec(f.position),"tangent":_vec(f.tangent),"normal":_vec(f.normal)})
 			layer_data.append({"closed":layer["closed"],"surface":layer.get("surface",false),"frames":layer_frames})
 		var curve_data := []
 		for j in range(sets.size()):
@@ -1381,7 +1568,10 @@ func _parse_frames(entries: Array) -> Array[CurveFrame]:
 			return []
 		if entry["position"].size() != 3 or entry["tangent"].size() != 3:
 			return []
-		loaded.append(CurveFrame.new(_from_array(entry["position"]),_from_array(entry["tangent"])))
+		var frame := CurveFrame.new(_from_array(entry["position"]),_from_array(entry["tangent"]))
+		if entry.get("normal",null) is Array and entry["normal"].size() == 3:
+			frame.normal = _from_array(entry["normal"]).normalized()
+		loaded.append(frame)
 	return loaded
 
 func _message(s: String) -> void:

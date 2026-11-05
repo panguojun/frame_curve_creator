@@ -3,7 +3,7 @@
 # A boundary-constrained harmonic height field over a planar projection.
 # It preserves the sampled 3D loop and never pretends to be an exact NURBS patch.
 
-func build(raw: PackedVector3Array, refine: int = 1, smooth: int = 20) -> Dictionary:
+func build(raw: PackedVector3Array, refine: int = 1, smooth: int = 20, normal_controls: Array = []) -> Dictionary:
 	var boundary := PackedVector3Array()
 	for p in raw:
 		if boundary.is_empty() or boundary[-1].distance_to(p) > 0.00001:
@@ -57,7 +57,7 @@ func build(raw: PackedVector3Array, refine: int = 1, smooth: int = 20) -> Dictio
 	for i in range(uv.size()):
 		boundary_edges[_edge_key(i,(i+1)%uv.size())] = true
 	if refine > 0:
-		var target := sqrt(area/float(boundary.size())) * 1.25 / pow(1.45, float(clampi(refine,1,3)-1))
+		var target := sqrt(area/float(boundary.size())) * 0.95 / pow(1.45, float(clampi(refine,1,3)-1))
 		triangles = _refine_by_length(uv, heights, fixed, triangles, boundary_edges, target)
 	triangles = _improve_triangles(uv, heights, triangles)
 	_relax_interior(uv, triangles, fixed)
@@ -96,6 +96,8 @@ func build(raw: PackedVector3Array, refine: int = 1, smooth: int = 20) -> Dictio
 					heights[i] = next_height
 			if max_change < tolerance:
 				break
+	if not normal_controls.is_empty():
+		_apply_normal_directions(uv, heights, fixed, neighbors, origin, axis_u, axis_v, normal, area, normal_controls)
 	var vertices := PackedVector3Array()
 	for i in range(uv.size()):
 		vertices.append(origin + axis_u*uv[i].x + axis_v*uv[i].y + normal*heights[i])
@@ -143,6 +145,48 @@ func build(raw: PackedVector3Array, refine: int = 1, smooth: int = 20) -> Dictio
 		return {"error":"Surface topology is not a disk"}
 	return {"vertices":vertices,"indices":triangles,"boundary_count":boundary.size(),"boundary_edges":boundary_edge_count,"triangle_count":triangle_count,"projected_area":area,"euler":euler}
 
+func _apply_normal_directions(uv: PackedVector2Array, heights: PackedFloat32Array, fixed: PackedByteArray, neighbors: Array[Dictionary], origin: Vector3, axis_u: Vector3, axis_v: Vector3, normal: Vector3, area: float, controls: Array) -> void:
+	# Smooth, localized slope fields avoid the medial-axis crease caused by
+	# choosing a different nearest boundary segment for adjacent vertices.
+	var radius := maxf(sqrt(area) * 0.35, 0.001)
+	var radius_squared := radius * radius
+	var correction := PackedFloat32Array()
+	correction.resize(uv.size())
+	for control in controls:
+		var offset: Vector3 = control["position"] - origin
+		var location := Vector2(offset.dot(axis_u), offset.dot(axis_v))
+		var control_normal: Vector3 = control["normal"]
+		var height_part := control_normal.dot(normal)
+		if absf(height_part) < 0.25:
+			# The normal is nearly parallel to the projection plane; clamping
+			# the denominator would inflate the slope and push the surface the
+			# wrong way. Skip this handle instead.
+			continue
+		var slope := -Vector2(control_normal.dot(axis_u), control_normal.dot(axis_v)) / height_part
+		slope = slope.limit_length(1.5)
+		for i in range(uv.size()):
+			if fixed[i] != 0:
+				continue
+			var delta := uv[i] - location
+			correction[i] += slope.dot(delta) * exp(-delta.length_squared() / (2.0 * radius_squared))
+	for _pass in range(2):
+		var smoothed := correction.duplicate()
+		for i in range(uv.size()):
+			if fixed[i] != 0 or neighbors[i].is_empty():
+				continue
+			var total := 0.0
+			var weight_sum := 0.0
+			for neighbor in neighbors[i]:
+				var weight: float = neighbors[i][neighbor]
+				total += correction[neighbor] * weight
+				weight_sum += weight
+			if weight_sum > 0.0:
+				smoothed[i] = lerpf(correction[i], total / weight_sum, 0.35)
+		correction = smoothed
+	for i in range(uv.size()):
+		if fixed[i] == 0:
+			heights[i] += clampf(correction[i], -radius * 1.5, radius * 1.5)
+
 func _add_cotangent_weight(neighbors: Array[Dictionary], uv: PackedVector2Array, a: int, b: int, opposite: int) -> void:
 	var va := uv[a] - uv[opposite]
 	var vb := uv[b] - uv[opposite]
@@ -177,8 +221,12 @@ func _refine_by_length(uv: PackedVector2Array, heights: PackedFloat32Array, fixe
 			for j in range(3):
 				var a := triangles[k+j]
 				var b := triangles[k+(j+1)%3]
-				var spatial_length := sqrt(uv[a].distance_squared_to(uv[b]) + pow(heights[a]-heights[b],2))
-				if spatial_length > target*1.35:
+				# Split in the 2D parameter domain, because refinement, edge flips
+				# and relaxation all operate on uv; using 3D length here over-
+				# subdivides steep-but-flat projections and under-subdivides long
+				# shallow ones.
+				var planar_length := uv[a].distance_to(uv[b])
+				if planar_length > target*1.35:
 					split[_edge_key(a,b)] = true
 		if split.is_empty():
 			break
@@ -200,12 +248,19 @@ func _refine_by_length(uv: PackedVector2Array, heights: PackedFloat32Array, fixe
 			if ring.size() == 3:
 				next.append_array(PackedInt32Array([a,b,c]))
 				continue
-			var center := uv.size()
-			uv.append((uv[a]+uv[b]+uv[c])/3.0)
-			heights.append((heights[a]+heights[b]+heights[c])/3.0)
-			fixed.append(0)
-			for j in range(ring.size()):
-				next.append_array(PackedInt32Array([center,ring[j],ring[(j+1)%ring.size()]]))
+			var local_uv := PackedVector2Array()
+			for index in ring:
+				local_uv.append(uv[index])
+			var local_triangles := Geometry2D.triangulate_polygon(local_uv)
+			for j in range(0, local_triangles.size(), 3):
+				var ia := ring[local_triangles[j]]
+				var ib := ring[local_triangles[j+1]]
+				var ic := ring[local_triangles[j+2]]
+				if (uv[ib]-uv[ia]).cross(uv[ic]-uv[ia]) < 0.0:
+					var swap := ib
+					ib = ic
+					ic = swap
+				next.append_array(PackedInt32Array([ia,ib,ic]))
 		triangles = next
 		var new_boundary := {}
 		for key in boundary_edges:
@@ -256,6 +311,8 @@ func _improve_triangles(uv: PackedVector2Array, heights: PackedFloat32Array, ind
 				if id != a and id != b:
 					d = id
 			if c < 0 or d < 0 or c == d:
+				continue
+			if owners.has(_edge_key(c,d)):
 				continue
 			if (uv[b]-uv[a]).cross(uv[c]-uv[a]) < 0.0:
 				var tmp := a

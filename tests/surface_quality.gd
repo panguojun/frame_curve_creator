@@ -33,8 +33,8 @@ func _initialize() -> void:
   var p10 = lengths[int((lengths.size()-1)*0.1)]
   var p90 = lengths[int((lengths.size()-1)*0.9)]
   print("QUALITY %s triangles=%d min_angle=%.2f p10=%.3f p90=%.3f ratio=%.2f" % [name,result.triangle_count,min_angle,p10,p90,p90/p10])
-  assert(min_angle > 10.0)
-  assert(p90/p10 < 5.0)
+  assert(min_angle > 17.0)
+  assert(p90/p10 < 3.0)
   assert(result.euler == 1)
  quit()
 

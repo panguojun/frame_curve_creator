@@ -1,0 +1,6 @@
+Godot Engine v4.7.2.stable.steam.ed1daf0bf - https://godotengine.org
+
+Planar circle: max interior |z| = 0.000000
+Tilted square: max |z - 0.5| = 0.000000
+Wave circle: max boundary drift = 0.000000
+Harmonic correctness checks passed

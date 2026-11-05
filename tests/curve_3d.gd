@@ -1,4 +1,4 @@
-extends SceneTree
+﻿extends SceneTree
 
 func _initialize() -> void:
 	var scene := load("res://scenes/main_3d.tscn") as PackedScene
@@ -10,6 +10,8 @@ func _initialize() -> void:
 func _check(editor: Control) -> void:
 	assert(editor.frames.size() == 4)
 	assert(editor._panel_rect(0).position.x == editor.RAIL_W)
+	assert(editor.properties.position.x == editor.size.x - editor.PROP_W)
+	assert(editor.tangent_checkbox.position.x < editor.RAIL_W and editor.torsion_checkbox.position.x < editor.RAIL_W)
 	assert(editor.properties != null and editor.property_fields.size() == 6)
 	var f = editor.frames[1]
 	var initial: Vector3 = f.position
