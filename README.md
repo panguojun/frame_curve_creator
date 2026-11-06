@@ -1,7 +1,7 @@
+
 # 3D Frame Curve Board
 
-<img width="1282" height="839" alt="8b9d310daacab8a6105500c070686635" src="https://github.com/user-attachments/assets/2d4a969a-9d9b-4925-9db6-2b3f29062aae" />
-
+<img width="1917" height="1078" alt="屏幕截图 2026-11-06 100135" src="https://github.com/user-attachments/assets/b44239bb-1181-49b4-804c-fd0ef6dbd373" />
 A Godot 4 editor for spatial cubic Hermite curves. The Windows executable is `Frame3DCurveBoard.exe` in the project root. The scene is `scenes/main_3d.tscn`.
 
 ## Workspace
