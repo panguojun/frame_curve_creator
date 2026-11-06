@@ -8,16 +8,16 @@ class CurveFrame:
 		position = p
 		tangent = t
 
-const BG := Color("161c27")
-const PANEL := Color("202938")
-const GRID := Color("374456")
-const BLUE := Color("499cf5")
-const GREEN := Color("4ed492")
-const YELLOW := Color("ffe36a")
+const BG := Color("242a32")
+const PANEL := Color("1c222a")
+const GRID := Color("38414b")
+const BLUE := Color("69a9e8")
+const GREEN := Color("76c9a2")
+const YELLOW := Color("eacb79")
 const HEADER_H := 42.0
 const FOOTER_H := 30.0
-const RAIL_W := 104.0
-const PROP_W := 290.0
+const RAIL_W := 112.0
+const PROP_W := 266.0
 const HANDLE_FACTOR := 0.32
 const SAMPLES := 36
 const BLENDER_EXE := "C:/Program Files (x86)/Steam/steamapps/common/Blender/blender.exe"
@@ -138,13 +138,19 @@ var toast_until := 0
 var zen_mode := false
 var old_window_mode := DisplayServer.WINDOW_MODE_WINDOWED
 var properties: Control
+var property_scroll: ScrollContainer
 var property_title: Label
 var property_fields: Array[SpinBox] = []
 var tangent_checkbox: CheckBox
 var torsion_checkbox: CheckBox
-var normal_fields: Array[SpinBox] = []
+var frame_info: Label
+var tangent_info: Label
+var normal_info: Label
+var curve_info: Label
+var bounds_info: Label
 var updating_fields := false
 var surface_info: Label
+var surface_area_info: Label
 var surface_detail_field: SpinBox
 var surface_smooth_field: SpinBox
 
@@ -453,88 +459,108 @@ func _make_properties() -> void:
 	properties = Control.new()
 	properties.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(properties)
+	property_scroll = ScrollContainer.new()
+	property_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	properties.add_child(property_scroll)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 10)
+	property_scroll.add_child(content)
 	property_title = Label.new()
 	property_title.text = "SELECT A FRAME"
-	property_title.position = Vector2(16, 20)
 	property_title.add_theme_font_size_override("font_size", 17)
-	properties.add_child(property_title)
-	var headings := ["POSITION / XYZ", "TANGENT / XYZ", "NORMAL / XYZ"]
-	var axes := ["X", "Y", "Z"]
-	for group in range(3):
-		var heading := Label.new()
-		heading.text = headings[group]
-		heading.position = Vector2(16, 56 + group*135)
-		heading.add_theme_font_size_override("font_size", 13)
-		properties.add_child(heading)
-		for axis in range(3):
-			var row := group*3 + axis
-			var label := Label.new()
-			label.text = axes[axis]
-			label.position = Vector2(18, 83 + group*135 + axis*36)
-			label.add_theme_font_size_override("font_size", 15)
-			properties.add_child(label)
-			var field := SpinBox.new()
-			field.min_value = -10000.0
-			field.max_value = 10000.0
-			field.step = 0.01
-			field.allow_greater = true
-			field.allow_lesser = true
-			field.position = Vector2(54, 76 + group*135 + axis*36)
-			field.size = Vector2(PROP_W-72, 31)
-			field.value_changed.connect(_on_property_changed.bind(row))
-			properties.add_child(field)
-			if group == 2:
-				normal_fields.append(field)
-			else:
-				property_fields.append(field)
-	tangent_checkbox = CheckBox.new()
-	tangent_checkbox.text = "Tangent"
-	tangent_checkbox.button_pressed = true
-	tangent_checkbox.position = Vector2(5, HEADER_H + 8)
-	tangent_checkbox.size = Vector2(RAIL_W - 10, 28)
-	tangent_checkbox.toggled.connect(_on_handle_visibility_changed)
-	add_child(tangent_checkbox)
-	torsion_checkbox = CheckBox.new()
-	torsion_checkbox.text = "Torsion"
-	torsion_checkbox.position = Vector2(5, HEADER_H + 43)
-	torsion_checkbox.size = Vector2(RAIL_W - 10, 28)
-	torsion_checkbox.toggled.connect(_on_handle_visibility_changed)
-	add_child(torsion_checkbox)
-	var hint := Label.new()
-	hint.text = "Drag empty space to box-select.\nAlt+drag boxes in PERSPECTIVE.\nShift adds to the selection."
-	hint.position = Vector2(16, 460)
-	properties.add_child(hint)
-	surface_info = Label.new()
-	surface_info.position = Vector2(16, 525)
-	surface_info.text = "SURFACE  off"
-	properties.add_child(surface_info)
+	content.add_child(property_title)
+	frame_info = _inspector_text(content, "Select a point to inspect its frame.")
+	_inspector_heading(content, "POSITION  ·  XYZ")
+	var position_grid := GridContainer.new()
+	position_grid.columns = 2
+	position_grid.add_theme_constant_override("h_separation", 10)
+	position_grid.add_theme_constant_override("v_separation", 5)
+	content.add_child(position_grid)
+	for axis in range(3):
+		var label := Label.new()
+		label.text = ["X", "Y", "Z"][axis]
+		label.custom_minimum_size.x = 20
+		position_grid.add_child(label)
+		var field := SpinBox.new()
+		field.min_value = -10000.0
+		field.max_value = 10000.0
+		field.step = 0.01
+		field.allow_greater = true
+		field.allow_lesser = true
+		field.custom_minimum_size = Vector2(PROP_W - 74, 30)
+		field.value_changed.connect(_on_property_changed.bind(axis))
+		position_grid.add_child(field)
+		property_fields.append(field)
+	_inspector_heading(content, "FRAME DIRECTION")
+	tangent_info = _inspector_text(content, "Tangent  —")
+	normal_info = _inspector_text(content, "Normal  —")
+	_inspector_heading(content, "CURVE")
+	curve_info = _inspector_text(content, "—")
+	bounds_info = _inspector_text(content, "—")
+	_inspector_heading(content, "SURFACE")
+	surface_info = _inspector_text(content, "Off")
+	surface_area_info = _inspector_text(content, "Projected area  —")
+	var settings := GridContainer.new()
+	settings.columns = 2
+	settings.add_theme_constant_override("h_separation", 10)
+	settings.add_theme_constant_override("v_separation", 6)
+	content.add_child(settings)
 	var detail_label := Label.new()
 	detail_label.text = "Detail"
-	detail_label.position = Vector2(16, 565)
-	properties.add_child(detail_label)
+	settings.add_child(detail_label)
 	surface_detail_field = SpinBox.new()
 	surface_detail_field.min_value = 0
 	surface_detail_field.max_value = 2
 	surface_detail_field.step = 1
 	surface_detail_field.value = surface_refine
-	surface_detail_field.position = Vector2(90, 557)
-	surface_detail_field.size = Vector2(PROP_W-108,32)
+	surface_detail_field.custom_minimum_size = Vector2(PROP_W - 112, 30)
 	surface_detail_field.value_changed.connect(_on_surface_detail_changed)
-	properties.add_child(surface_detail_field)
+	settings.add_child(surface_detail_field)
 	var smooth_label := Label.new()
 	smooth_label.text = "Smooth"
-	smooth_label.position = Vector2(16, 605)
-	properties.add_child(smooth_label)
+	settings.add_child(smooth_label)
 	surface_smooth_field = SpinBox.new()
 	surface_smooth_field.min_value = 0
 	surface_smooth_field.max_value = 60
 	surface_smooth_field.step = 1
 	surface_smooth_field.value = surface_smooth
-	surface_smooth_field.position = Vector2(90, 597)
-	surface_smooth_field.size = Vector2(PROP_W-108,32)
+	surface_smooth_field.custom_minimum_size = Vector2(PROP_W - 112, 30)
 	surface_smooth_field.value_changed.connect(_on_surface_smooth_changed)
-	properties.add_child(surface_smooth_field)
+	settings.add_child(surface_smooth_field)
+	_inspector_heading(content, "QUICK HELP")
+	var hint := _inspector_text(content, "Drag points to move.\nShift + click to select more.\nDrag blue/yellow handles to edit.\nAlt + drag to box-select in 3D.")
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tangent_checkbox = CheckBox.new()
+	tangent_checkbox.text = "Tangent"
+	tangent_checkbox.button_pressed = true
+	tangent_checkbox.position = Vector2(7, HEADER_H + 9)
+	tangent_checkbox.size = Vector2(RAIL_W - 10, 28)
+	tangent_checkbox.toggled.connect(_on_handle_visibility_changed)
+	add_child(tangent_checkbox)
+	torsion_checkbox = CheckBox.new()
+	torsion_checkbox.text = "Torsion"
+	torsion_checkbox.position = Vector2(7, HEADER_H + 43)
+	torsion_checkbox.size = Vector2(RAIL_W - 10, 28)
+	torsion_checkbox.toggled.connect(_on_handle_visibility_changed)
+	add_child(torsion_checkbox)
 	_layout_properties()
+
+func _inspector_heading(parent: VBoxContainer, title: String) -> void:
+	var label := Label.new()
+	label.text = title
+	label.add_theme_font_size_override("font_size", 12)
+	label.add_theme_color_override("font_color", Color("8fb5d5"))
+	parent.add_child(label)
+
+func _inspector_text(parent: VBoxContainer, value: String) -> Label:
+	var label := Label.new()
+	label.text = value
+	label.custom_minimum_size.x = PROP_W - 36
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("font_size", 13)
+	label.add_theme_color_override("font_color", Color("c8d2dc"))
+	parent.add_child(label)
+	return label
 
 func _on_handle_visibility_changed(_enabled: bool) -> void:
 	_refresh()
@@ -567,7 +593,9 @@ func _layout_properties() -> void:
 	tangent_checkbox.visible = not zen_mode
 	torsion_checkbox.visible = not zen_mode
 	properties.position = Vector2(size.x-PROP_W, HEADER_H)
-	properties.size = Vector2(PROP_W, maxf(100.0, size.y-HEADER_H))
+	properties.size = Vector2(PROP_W, maxf(100.0, size.y-HEADER_H-FOOTER_H))
+	property_scroll.position = Vector2(12, 12)
+	property_scroll.size = properties.size - Vector2(20, 20)
 
 func _sync_properties() -> void:
 	if property_title == null:
@@ -575,24 +603,37 @@ func _sync_properties() -> void:
 	updating_fields = true
 	property_title.text = "%d FRAMES SELECTED" % selected_frames.size() if selected_frames.size() > 1 else ("FRAME %d" % (selected+1) if selected >= 0 else "SELECT A FRAME")
 	for field in property_fields:
-		field.editable = selected >= 0 and selected_frames.size() <= 1
-	for field in normal_fields:
-		field.editable = selected >= 0 and selected_frames.size() <= 1 and torsion_checkbox.button_pressed
+		field.editable = selected >= 0 and selected_frames.size() == 1
+	frame_info.text = "One frame active" if selected_frames.size() == 1 else "%d points · drag together" % selected_frames.size() if selected_frames.size() > 1 else "Select a point to inspect its frame."
 	if selected >= 0 and selected_frames.size() <= 1:
 		var f := frames[selected]
-		var values := [f.position.x, f.position.y, f.position.z, f.tangent.x, f.tangent.y, f.tangent.z]
-		for i in range(6):
-			property_fields[i].value = values[i]
-		var n := _frame_normal(f)
 		for i in range(3):
-			normal_fields[i].value = n[i]
+			property_fields[i].value = f.position[i]
+		tangent_info.text = "Tangent length  %.2f" % f.tangent.length()
+		normal_info.text = "Normal  (%.2f, %.2f, %.2f)" % [_frame_normal(f).x, _frame_normal(f).y, _frame_normal(f).z]
+	else:
+		tangent_info.text = "Tangent length  —"
+		normal_info.text = "Normal  —"
+	var points := _sample_frame_curve(frames, closed)
+	var length := 0.0
+	for i in range(1, points.size()):
+		length += points[i-1].distance_to(points[i])
+	curve_info.text = "%d frames · %s · length %.2f" % [frames.size(), "closed" if closed else "open", length]
+	if not points.is_empty():
+		var bounds := AABB(points[0], Vector3.ZERO)
+		for point in points:
+			bounds = bounds.expand(point)
+		bounds_info.text = "Size  %.2f × %.2f × %.2f" % [bounds.size.x, bounds.size.y, bounds.size.z]
 	if surface_info != null:
 		if not surface_enabled:
-			surface_info.text = "SURFACE  off"
+			surface_info.text = "Off · press S to generate"
+			surface_area_info.text = "Projected area  —"
 		elif surface_data.has("error"):
-			surface_info.text = "SURFACE  invalid boundary"
+			surface_info.text = "Invalid boundary"
+			surface_area_info.text = str(surface_data["error"])
 		else:
-			surface_info.text = "SURFACE  %d triangles" % surface_data.get("triangle_count",0)
+			surface_info.text = "%d triangles · disk mesh" % surface_data.get("triangle_count",0)
+			surface_area_info.text = "Projected area  %.2f" % surface_data.get("projected_area",0.0)
 	updating_fields = false
 
 func _on_property_changed(value: float, row: int) -> void:
@@ -787,19 +828,22 @@ func _draw_box_overlay() -> void:
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), BG)
 	if not zen_mode:
-		draw_rect(Rect2(Vector2.ZERO, Vector2(size.x, HEADER_H)), Color("111722"))
-		draw_rect(Rect2(0, HEADER_H, RAIL_W, size.y-HEADER_H), Color("1b2432"))
-		draw_rect(Rect2(size.x-PROP_W, HEADER_H, PROP_W, size.y-HEADER_H), Color("1b2432"))
+		draw_rect(Rect2(Vector2.ZERO, Vector2(size.x, HEADER_H)), Color("343d47"))
+		draw_rect(Rect2(0, HEADER_H, RAIL_W, size.y-HEADER_H), Color("303944"))
+		draw_rect(Rect2(size.x-PROP_W, HEADER_H, PROP_W, size.y-HEADER_H), Color("303944"))
+		draw_line(Vector2(RAIL_W, HEADER_H), Vector2(RAIL_W, size.y-FOOTER_H), Color("55616e"), 1.0)
+		draw_line(Vector2(size.x-PROP_W, HEADER_H), Vector2(size.x-PROP_W, size.y-FOOTER_H), Color("55616e"), 1.0)
 		_draw_toolbar()
 	var curves := _sample_curves()
 	for i in range(4):
 		var r := _panel_rect(i)
-		draw_rect(r, PANEL if i != active_view else Color("253247"))
-		draw_rect(r, Color("68788c"), false, 1.0)
-		var title: String = ["FRONT  X / Y", "TOP  X / Z", "RIGHT  Z / Y", "PERSPECTIVE  drag to orbit / wheel to zoom"][i]
-		draw_string(ThemeDB.fallback_font, r.position + Vector2(12, 18), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
+		draw_rect(r, PANEL if i != active_view else Color("273440"))
+		draw_rect(r, Color("8296a9") if i == active_view else Color("515d69"), false, 1.0)
 		if i < 3:
 			_draw_ortho(i, curves)
+		draw_rect(Rect2(r.position + Vector2(1, 1), Vector2(r.size.x-2, 24)), Color("2b343e"))
+		var title: String = ["FRONT  X / Y", "TOP  X / Z", "RIGHT  Z / Y", "PERSPECTIVE  drag to orbit / wheel to zoom"][i]
+		draw_string(ThemeDB.fallback_font, r.position + Vector2(10, 18), title, HORIZONTAL_ALIGNMENT_LEFT, r.size.x-18, 13, Color("d5e1eb"))
 	if zen_mode:
 		draw_rect(Rect2(12, 9, 222, 25), Color(0,0,0,0.55))
 		draw_string(ThemeDB.fallback_font, Vector2(20, 27), "ZEN  ·  F11 / Esc to exit", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
@@ -807,8 +851,9 @@ func _draw() -> void:
 		_draw_footer()
 
 func _draw_toolbar() -> void:
-	draw_string(ThemeDB.fallback_font, Vector2(15, 28), "3D FRAME CURVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, Vector2(size.x-PROP_W+16, 28), "PROPERTIES", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("b6c5d8"))
+	draw_string(ThemeDB.fallback_font, Vector2(14, 27), "TOOLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("e8eef4"))
+	draw_string(ThemeDB.fallback_font, Vector2(RAIL_W+14, 27), "FRAME CURVE  /  3D", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("e8eef4"))
+	draw_string(ThemeDB.fallback_font, Vector2(size.x-PROP_W+14, 27), "INSPECTOR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("e8eef4"))
 	var labels := ["ADD", "INSERT", "DELETE", "CLOSE", "TEMPLATE", "SURFACE", "BLENDER", "EXPORT", "OPEN", "RESET", "ZEN", "UNDO"]
 	var active_states := [false, insert_mode, false, closed, false, surface_enabled, false, false, false, false, false, false]
 	var hovered := _toolbar_hover_index
@@ -816,23 +861,26 @@ func _draw_toolbar() -> void:
 		var box := _tool_rect(j)
 		var bg: Color
 		if active_states[j]:
-			bg = Color("3a7ec2")
+			bg = Color("537da0")
 		elif j == hovered:
-			bg = Color("32425a")
+			bg = Color("536170")
 		else:
-			bg = Color("222d3d")
+			bg = Color("3e4a56")
 		draw_rect(box, bg)
 		# Left accent bar for active state.
 		if active_states[j]:
-			draw_rect(Rect2(box.position, Vector2(3, box.size.y)), Color("6cb4ff"))
-		draw_rect(box, Color("3a4a60"), false, 1.0)
+			draw_rect(Rect2(box.position, Vector2(3, box.size.y)), Color("a5d3f2"))
+		draw_rect(box, Color("768593"), false, 1.0)
 		var text_color := Color.WHITE if active_states[j] else Color("c8d4e4")
-		draw_string(ThemeDB.fallback_font, box.position + Vector2(14, 24), labels[j], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_color)
+		draw_string(ThemeDB.fallback_font, box.position + Vector2(12, box.size.y*0.5+5), labels[j], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_color)
 
 var _toolbar_hover_index := -1
 
 func _tool_rect(j: int) -> Rect2:
-	return Rect2(9, HEADER_H + 96 + j*40, RAIL_W-18, 34)
+	var top := HEADER_H + 88.0
+	var available := maxf(330.0, size.y - FOOTER_H - top - 8.0)
+	var step := clampf(available / 12.0, 28.0, 40.0)
+	return Rect2(8, top + j*step, RAIL_W-16, step-4.0)
 
 func _toolbar_action(p: Vector2) -> bool:
 	if zen_mode or p.x > RAIL_W or p.y < HEADER_H:
@@ -882,7 +930,7 @@ func _draw_ortho(index: int, curves: Dictionary) -> void:
 		var f := frames[j]
 		var p := _project(f.position, index)
 		if r.grow(-6).has_point(p):
-			if selected_frames.size() == 1 and selected == j:
+			if selected_frames.has(j):
 				if tangent_checkbox.button_pressed:
 					var t := _project(f.position + f.tangent * HANDLE_FACTOR, index)
 					draw_line(p, t, BLUE, 1.5)
@@ -904,14 +952,14 @@ func _draw_polyline(points: PackedVector3Array, index: int, color: Color, width:
 
 func _draw_footer() -> void:
 	var y := size.y - FOOTER_H
-	draw_rect(Rect2(0, y, size.x, FOOTER_H), Color("111722"))
+	draw_rect(Rect2(0, y, size.x, FOOTER_H), Color("343d47"))
 	var s := "Drag empty space to box-select · Alt+drag in perspective · Shift adds · Ctrl+Z undo"
 	if selected_frames.size() == 1 and selected >= 0 and selected < frames.size():
 		var f := frames[selected]
 		s = "Frame %d  XYZ (%.2f, %.2f, %.2f)  tangent (%.2f, %.2f, %.2f)    |    %s" % [selected+1, f.position.x, f.position.y, f.position.z, f.tangent.x, f.tangent.y, f.tangent.z, s]
 	if Time.get_ticks_msec() < toast_until:
 		s = toast
-	draw_string(ThemeDB.fallback_font, Vector2(12, y+23), s, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(12, y+23), s, HORIZONTAL_ALIGNMENT_LEFT, size.x-24, 13, Color.WHITE)
 
 func _input(event: InputEvent) -> void:
 	if save_dialog.visible or template_save_dialog.visible or load_dialog.visible or template_dialog.visible or template_replace_dialog.visible:
@@ -964,6 +1012,9 @@ func _mouse_button(e: InputEventMouseButton) -> void:
 				if e.shift_pressed and hit3d["part"] == "point":
 					_toggle_selected(hit3d["index"])
 					drag_mode = ""
+				elif selected_frames.has(hit3d["index"]):
+					selected = hit3d["index"]
+					drag_mode = hit3d["part"]
 				else:
 					_select_only(hit3d["index"])
 					drag_mode = hit3d["part"]
@@ -991,9 +1042,9 @@ func _mouse_button(e: InputEventMouseButton) -> void:
 			elif e.shift_pressed and hit["part"] == "point":
 				_toggle_selected(hit["index"])
 				drag_mode = ""
-			elif hit["index"] >= 0 and selected_frames.size() > 1 and selected_frames.has(hit["index"]) and hit["part"] == "point":
+			elif selected_frames.has(hit["index"]):
 				selected = hit["index"]
-				drag_mode = "point"
+				drag_mode = hit["part"]
 			else:
 				_select_only(hit["index"])
 				drag_mode = hit["part"]
@@ -1101,13 +1152,15 @@ func _hit(p: Vector2, v: int, prefer_unselected: bool = false) -> Dictionary:
 	for j in range(frames.size()):
 		var f := frames[j]
 		var handles := [{"position":f.position,"part":"point"}]
-		if selected_frames.size() == 1 and selected == j:
+		if selected_frames.has(j):
 			if tangent_checkbox.button_pressed:
 				handles.append({"position":f.position + f.tangent*HANDLE_FACTOR,"part":"tangent"})
 			if torsion_checkbox.button_pressed:
 				handles.append({"position":f.position + _frame_normal(f)*0.8,"part":"normal"})
 		for handle in handles:
-			var d := p.distance_to(_project(handle["position"], v))
+			if v == 3 and camera.is_position_behind(handle["position"]):
+				continue
+			var d := p.distance_to(_selection_projection(handle["position"], v))
 			if d < best or (prefer_unselected and handle["part"] == "point" and is_equal_approx(d,best) and not selected_frames.has(j)):
 				best = d
 				result = {"index": j, "part": handle["part"]}
@@ -1118,7 +1171,9 @@ func _hit_other(p: Vector2, v: int) -> Dictionary:
 	var result := {"layer":-1}
 	for layer_index in range(other_curves.size()):
 		for frame in other_curves[layer_index]["frames"]:
-			var d := p.distance_to(_project(frame.position,v))
+			if v == 3 and camera.is_position_behind(frame.position):
+				continue
+			var d := p.distance_to(_selection_projection(frame.position,v))
 			if d < best:
 				best = d
 				result = {"layer":layer_index}
@@ -1374,8 +1429,8 @@ func _update_dynamic_3d() -> void:
 	curve_node.mesh = _line_mesh(c["center"])
 	var tangent_points := PackedVector3Array()
 	var normal_points := PackedVector3Array()
-	if selected_frames.size() == 1 and selected >= 0:
-		var f := frames[selected]
+	for index in selected_frames:
+		var f := frames[index]
 		if tangent_checkbox.button_pressed:
 			tangent_points.append(f.position)
 			tangent_points.append(f.position+f.tangent*HANDLE_FACTOR)

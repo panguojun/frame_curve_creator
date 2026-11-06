@@ -12,7 +12,7 @@ func _check(editor: Control) -> void:
 	assert(editor._panel_rect(0).position.x == editor.RAIL_W)
 	assert(editor.properties.position.x == editor.size.x - editor.PROP_W)
 	assert(editor.tangent_checkbox.position.x < editor.RAIL_W and editor.torsion_checkbox.position.x < editor.RAIL_W)
-	assert(editor.properties != null and editor.property_fields.size() == 6)
+	assert(editor.properties != null and editor.property_fields.size() == 3)
 	var f = editor.frames[1]
 	var initial: Vector3 = f.position
 	var front: Vector2 = editor._project(f.position, 0)
@@ -126,7 +126,7 @@ func _check(editor: Control) -> void:
 	assert(editor.selected_frames.size() == 2)
 	assert(editor._move_indices().size() == 4)
 	editor._sync_properties()
-	assert(not editor.property_fields[3].editable)
+	assert(not editor.property_fields[0].editable)
 	editor.active_view = 0
 	editor.drag_mode = "point"
 	editor.drag_start = editor._project(editor.frames[0].position, 0)
